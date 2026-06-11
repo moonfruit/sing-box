@@ -30,7 +30,24 @@ import (
 const (
 	mdnsPort        = 5353
 	mdnsClassTopBit = 1 << 15
-	mdnsTimeout     = time.Second
+	// mdnsTimeout is the hard cap of the response collection window.
+	mdnsTimeout = time.Second
+	// mdnsSettleTimeout is how long we keep collecting after the first answer
+	// arrived, so answers from other responders/interfaces can be merged.
+	mdnsSettleTimeout = 250 * time.Millisecond
+	// mdnsHeadroom is reserved from the caller's deadline so the merged
+	// response can still be delivered before upstream timeouts fire.
+	mdnsHeadroom = 500 * time.Millisecond
+	// mdnsMinWindow is the smallest collection window we accept. Without it a
+	// caller deadline tighter than mdnsHeadroom would clamp the window into the
+	// past, which sends the query and then gives up before any responder can
+	// possibly answer.
+	mdnsMinWindow = 200 * time.Millisecond
+	// mdnsNegativeTTL is the lifetime of a synthesized negative answer. It
+	// matches the TTL responders use for legacy unicast queries: long enough to
+	// avoid re-flooding the link, short enough that a host appearing on the
+	// network is picked up quickly.
+	mdnsNegativeTTL = 10
 )
 
 var (
@@ -49,8 +66,24 @@ var (
 func IsLocalDomain(name string) bool {
 	canonical := mDNS.CanonicalName(name)
 	return common.Any(mdnsLocalZones, func(zone string) bool {
-		return canonical == zone || strings.HasSuffix(canonical, "."+zone)
+		return zoneMatches(canonical, zone)
 	})
+}
+
+func zoneMatches(canonical string, zone string) bool {
+	return canonical == zone || strings.HasSuffix(canonical, "."+zone)
+}
+
+// localZoneOf returns the link-local zone a name belongs to, falling back to
+// the name itself when the transport is used for something outside them.
+func localZoneOf(name string) string {
+	canonical := mDNS.CanonicalName(name)
+	for _, zone := range mdnsLocalZones {
+		if zoneMatches(canonical, zone) {
+			return zone
+		}
+	}
+	return canonical
 }
 
 func RegisterTransport(registry *dns.TransportRegistry) {
@@ -126,44 +159,64 @@ func (t *Transport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg,
 	if err != nil {
 		return nil, E.Cause(err, "mdns: pack request")
 	}
-	exchangeCtx, cancel := context.WithTimeout(ctx, mdnsTimeout)
+	question := message.Question[0]
+	exchangeCtx, cancel := context.WithDeadline(ctx, queryDeadline(ctx, time.Now()))
 	defer cancel()
 	results := make(chan exchangeResult, len(targets))
 	for _, target := range targets {
 		go func() {
-			response, err := t.exchangeTarget(exchangeCtx, target, rawMessage, message.Question[0])
-			results <- exchangeResult{
-				response: response,
-				err:      err,
-			}
+			sent, err := t.exchangeTarget(exchangeCtx, target, rawMessage, question, func(candidate *mDNS.Msg) {
+				results <- exchangeResult{response: candidate}
+			})
+			results <- exchangeResult{sent: sent, err: err}
 		}()
 	}
+
 	response := newResponse(message)
 	seenRecords := make(map[string]bool)
+	// PTR and ANY questions expect shared records from multiple responders,
+	// so they always use the full collection window.
+	settleEligible := question.Qtype != mDNS.TypePTR && question.Qtype != mDNS.TypeANY
 	var (
-		exchangeErr      error
-		completedTargets int
+		settleTimer  *time.Timer
+		targetErrors []error
+		sentQuery    bool
 	)
-	for range targets {
+	// Drain all results, including after cancellation. Each target sends its
+	// completion (a result without a response) after its last candidate.
+	for remaining := len(targets); remaining > 0; {
 		result := <-results
-		if result.err != nil {
-			exchangeErr = E.Errors(exchangeErr, result.err)
-			t.logger.TraceContext(ctx, result.err)
+		if result.response != nil {
+			mergeResponse(response, result.response, seenRecords)
+			if settleEligible && settleTimer == nil && len(response.Answer) > 0 {
+				settleTimer = time.AfterFunc(mdnsSettleTimeout, cancel)
+				defer settleTimer.Stop()
+			}
 			continue
 		}
-		completedTargets++
-		mergeResponse(response, result.response, seenRecords)
+		remaining--
+		sentQuery = sentQuery || result.sent
+		if result.err != nil {
+			targetErrors = append(targetErrors, result.err)
+			t.logger.TraceContext(ctx, result.err)
+		}
 	}
 	if len(response.Answer) > 0 || len(response.Ns) > 0 || len(response.Extra) > 0 {
 		return response, nil
 	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	if completedTargets == 0 {
-		return nil, exchangeErr
+	if sentQuery {
+		// A query without a response is normal for mDNS. Return cacheable
+		// NODATA rather than an error that would tear down sibling queries.
+		appendNegativeAuthority(response, question)
+		return response, nil
 	}
-	return response, nil
+	if len(targetErrors) > 0 {
+		return nil, E.Errors(targetErrors...)
+	}
+	return nil, E.New("mdns: no query was sent")
 }
 
 func (t *Transport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callback func(response *mDNS.Msg, err error)) {
@@ -172,9 +225,21 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callba
 	}()
 }
 
-type exchangeResult struct {
-	response *mDNS.Msg
-	err      error
+// queryDeadline reserves mdnsHeadroom before the caller's deadline when
+// possible, clamping the collection window to [mdnsMinWindow, mdnsTimeout].
+// The minimum avoids an instant empty answer when the caller gives us less
+// than mdnsHeadroom. The caller's context can still end the window sooner.
+func queryDeadline(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(mdnsTimeout)
+	if ctxDeadline, loaded := ctx.Deadline(); loaded && !ctxDeadline.IsZero() {
+		if clamped := ctxDeadline.Add(-mdnsHeadroom); clamped.Before(deadline) {
+			deadline = clamped
+		}
+	}
+	if minDeadline := now.Add(mdnsMinWindow); deadline.Before(minDeadline) {
+		deadline = minDeadline
+	}
+	return deadline
 }
 
 type queryTarget struct {
@@ -182,12 +247,19 @@ type queryTarget struct {
 	family string
 }
 
-func (t *Transport) exchangeTarget(ctx context.Context, target queryTarget, rawMessage []byte, question mDNS.Question) (*mDNS.Msg, error) {
+type exchangeResult struct {
+	response *mDNS.Msg
+	sent     bool
+	err      error
+}
+
+func (t *Transport) exchangeTarget(ctx context.Context, target queryTarget, rawMessage []byte, question mDNS.Question, onResponse func(*mDNS.Msg)) (bool, error) {
 	packetConn, destination, err := t.listenPacket(ctx, target)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	defer packetConn.Close()
+	// The window, settle timer and caller cancellation all wake the same read.
 	stopRead := context.AfterFunc(ctx, func() {
 		packetConn.SetReadDeadline(time.Now())
 	})
@@ -195,19 +267,17 @@ func (t *Transport) exchangeTarget(ctx context.Context, target queryTarget, rawM
 
 	_, err = packetConn.WriteTo(rawMessage, destination)
 	if err != nil {
-		return nil, E.Cause(err, "mdns: write request on ", target.iface.Name, " ", target.family)
+		return false, E.Cause(err, "mdns: write request on ", target.iface.Name, " ", target.family)
 	}
-	response := newResponseFromQuestion(question)
-	seenRecords := make(map[string]bool)
 	buffer := buf.Get(buf.UDPBufferSize)
 	defer buf.Put(buffer)
-	for {
+	for ctx.Err() == nil {
 		n, source, readErr := packetConn.ReadFrom(buffer)
 		if readErr != nil {
-			if E.IsTimeout(readErr) {
-				return response, nil
+			if ctx.Err() != nil || E.IsTimeout(readErr) {
+				break
 			}
-			return nil, E.Cause(readErr, "mdns: read response on ", target.iface.Name, " ", target.family)
+			return true, E.Cause(readErr, "mdns: read response on ", target.iface.Name, " ", target.family)
 		}
 		if !validSource(source, target) {
 			continue
@@ -222,8 +292,9 @@ func (t *Transport) exchangeTarget(ctx context.Context, target queryTarget, rawM
 			continue
 		}
 		normalizeResponse(&candidate, question)
-		mergeResponse(response, &candidate, seenRecords)
+		onResponse(&candidate)
 	}
+	return true, nil
 }
 
 func (t *Transport) listenPacket(ctx context.Context, target queryTarget) (net.PacketConn, net.Addr, error) {
@@ -299,6 +370,9 @@ func (t *Transport) fetchInterfaces() ([]control.Interface, error) {
 				t.logger.Warn("mdns: interface ", interfaceName, " not found")
 				continue
 			}
+			// An explicitly configured interface is taken at its word, including
+			// point-to-point links: the operator knows their topology better
+			// than auto-discovery does.
 			if !isUsableInterface(*iface) {
 				t.logger.Warn("mdns: interface ", interfaceName, " is not usable")
 				continue
@@ -312,7 +386,7 @@ func (t *Transport) fetchInterfaces() ([]control.Interface, error) {
 			myInterfaces = interfaceMonitor.MyInterfaces()
 		}
 		interfaces = common.Filter(finder.Interfaces(), func(iface control.Interface) bool {
-			return isUsableInterface(iface) && iface.Flags&net.FlagPointToPoint == 0 && !slices.Contains(myInterfaces, iface.Name)
+			return isAutoUsableInterface(iface) && !slices.Contains(myInterfaces, iface.Name)
 		})
 	}
 	if len(interfaces) == 0 {
@@ -321,10 +395,19 @@ func (t *Transport) fetchInterfaces() ([]control.Interface, error) {
 	return interfaces, nil
 }
 
+// isUsableInterface reports whether mDNS can run on iface at all.
 func isUsableInterface(iface control.Interface) bool {
 	return iface.Flags&net.FlagUp != 0 &&
 		iface.Flags&net.FlagMulticast != 0 &&
 		iface.Flags&net.FlagLoopback == 0
+}
+
+// isAutoUsableInterface additionally skips point-to-point links when picking
+// interfaces automatically: mDNS is link-local, tunnels (VPNs) cannot carry it,
+// and multicast writes on them fail on some platforms. Interfaces named in the
+// configuration bypass this and only go through isUsableInterface.
+func isAutoUsableInterface(iface control.Interface) bool {
+	return isUsableInterface(iface) && iface.Flags&net.FlagPointToPoint == 0
 }
 
 func interfaceFamilies(iface control.Interface) (supports4, supports6 bool) {
@@ -371,6 +454,30 @@ func newResponseFromQuestion(question mDNS.Question) *mDNS.Msg {
 		},
 		Question: []mDNS.Question{question},
 	}
+}
+
+// appendNegativeAuthority synthesizes the SOA record that RFC 2308 negative
+// caching keys off. Nothing is authoritative for a link-local zone, so the
+// record exists only to carry a TTL: without it dns.Client computes a zero
+// lifetime, declines to cache the empty answer, and every repeated lookup
+// floods the link again.
+func appendNegativeAuthority(response *mDNS.Msg, question mDNS.Question) {
+	zone := localZoneOf(question.Name)
+	response.Ns = append(response.Ns, &mDNS.SOA{
+		Hdr: mDNS.RR_Header{
+			Name:   zone,
+			Rrtype: mDNS.TypeSOA,
+			Class:  mDNS.ClassINET,
+			Ttl:    mdnsNegativeTTL,
+		},
+		Ns:      zone,
+		Mbox:    zone,
+		Serial:  1,
+		Refresh: mdnsNegativeTTL,
+		Retry:   mdnsNegativeTTL,
+		Expire:  mdnsNegativeTTL,
+		Minttl:  mdnsNegativeTTL,
+	})
 }
 
 func validSource(source net.Addr, target queryTarget) bool {
