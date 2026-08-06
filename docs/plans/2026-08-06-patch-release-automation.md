@@ -945,9 +945,10 @@ resolve_conflicts() {
   done
 
   if ! gate_markers || ! gate_build || ! gate_test; then
-    log "闸门未通过，回退"
-    git reset --hard "@{1}" 2>/dev/null || true
-    git checkout -q "$cur" -- . 2>/dev/null || true
+    # 闸门跑在 rebase 收尾之后，此时已不在 rebase 现场，abort 无从谈起。
+    # git rebase 在开始前会写 ORIG_HEAD，直接回到那里即可。
+    log "闸门未通过，回退到 ORIG_HEAD"
+    git reset --hard ORIG_HEAD
     return 1
   fi
   return 0
@@ -958,9 +959,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 ```
 
-> 注意：闸门在 `rebase --continue` 跑完之后才执行，此时已不在 rebase 现场，
-> 故失败时用 `git reset --hard @{1}` 回到 rebase 前的 reflog 位置，而非 `rebase --abort`。
-> 若仍处在 rebase 中（`claude` 或 `--continue` 失败），才用 `abort`。
+> 注意两条回退路径的区别：`claude` 或 `rebase --continue` 失败时仍处在 rebase
+> 现场，用 `git rebase --abort`；闸门失败时 rebase 已收尾，用 `git reset --hard ORIG_HEAD`
+> （`git rebase` 开始前会写入该引用）。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1020,9 +1021,10 @@ git -C "$d" tag v1.0-reF1nd-moonfruit moonfruit
 ( cd "$d" && bash "$HERE/../scripts/rebase.sh" v1.1-reF1nd moonfruit )
 
 log_file=$(mktemp); printf '我把两侧改动合并了。\n' > "$log_file"
-body=$( cd "$d" && . "$HERE/../scripts/resolve.sh" >/dev/null 2>&1
-        . "$HERE/../scripts/review-pr.sh"
-        pr_body v1.0-reF1nd v1.1-reF1nd v1.0-reF1nd-moonfruit v1.1-reF1nd-moonfruit "$log_file" )
+# review-pr.sh 自身 source 了 resolve.sh（需要 newly_touched），这里只 source 它。
+body=$( cd "$d" \
+        && . "$HERE/../scripts/review-pr.sh" \
+        && pr_body v1.0-reF1nd v1.1-reF1nd v1.0-reF1nd-moonfruit v1.1-reF1nd-moonfruit "$log_file" )
 
 assert_contains "$body" "v1.0-reF1nd"            "正文含旧基点"
 assert_contains "$body" "v1.1-reF1nd"            "正文含新基点"
@@ -1360,11 +1362,15 @@ jobs:
         uses: actions/checkout@v5
         with: { fetch-depth: 0, path: src }
 
-      - name: 拉取 reF1nd 的 tag
+      - name: 拉取 reF1nd 的 tag 并落地集成分支
         working-directory: src
         run: |
+          set -euo pipefail
           git remote add ref1nd "https://github.com/${UPSTREAM_REPO}.git"
           git fetch --tags --quiet ref1nd
+          # actions/checkout 只建立 origin/* 远端引用；detect.sh 要对
+          # $INTEGRATION_BRANCH 跑 git describe / rev-parse，需要本地分支存在。
+          git branch -f "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH"
 
       - name: 解析放行评论
         id: ship
@@ -1604,6 +1610,8 @@ checkout 目标改为本仓库的 tag：
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: 组装 build tags
+        env:
+          TARGET: ${{ needs.detect.outputs.target }}
         run: |
           set -xeuo pipefail
           TAGS=$(cat release/DEFAULT_BUILD_TAGS)
@@ -1611,9 +1619,11 @@ checkout 目标改为本仓库的 tag：
             purego) TAGS="${TAGS},with_purego" ;;
             musl)   TAGS="${TAGS},with_musl" ;;
           esac
-          echo "BUILD_TAGS=${TAGS}" >> "$GITHUB_ENV"
-          echo "LDFLAGS_SHARED=$(cat release/LDFLAGS)" >> "$GITHUB_ENV"
-          echo "VERSION=${${{ needs.detect.outputs.target }}#v}" >> "$GITHUB_ENV"
+          {
+            echo "BUILD_TAGS=${TAGS}"
+            echo "LDFLAGS_SHARED=$(cat release/LDFLAGS)"
+            echo "VERSION=${TARGET#v}"
+          } >> "$GITHUB_ENV"
 
       - name: 克隆 cronet-go
         run: |
@@ -1695,30 +1705,7 @@ checkout 目标改为本仓库的 tag：
           retention-days: 7
 ```
 
-- [ ] **Step 2: 修正 VERSION 的取法**
-
-上面 `echo "VERSION=${${{ ... }}#v}"` 是非法的 shell（GitHub 表达式无法参与
-参数展开）。改为：
-
-```yaml
-      - name: 组装 build tags
-        env:
-          TARGET: ${{ needs.detect.outputs.target }}
-        run: |
-          set -xeuo pipefail
-          TAGS=$(cat release/DEFAULT_BUILD_TAGS)
-          case "${{ matrix.variant }}" in
-            purego) TAGS="${TAGS},with_purego" ;;
-            musl)   TAGS="${TAGS},with_musl" ;;
-          esac
-          {
-            echo "BUILD_TAGS=${TAGS}"
-            echo "LDFLAGS_SHARED=$(cat release/LDFLAGS)"
-            echo "VERSION=${TARGET#v}"
-          } >> "$GITHUB_ENV"
-```
-
-- [ ] **Step 3: 校验**
+- [ ] **Step 2: 校验**
 
 ```bash
 bash tests/run.sh
@@ -1727,7 +1714,7 @@ bash tests/run.sh
 Expected: actionlint 无输出。若报 `set -e` 与 `[ -f libcronet.so ] && cp ...`
 在末行返回非 0 的问题，把该行改为 `if [ -f libcronet.so ]; then cp libcronet.so "$DIR_NAME"; fi`。
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 3: 提交**
 
 ```bash
 git add .github/workflows/release.yml
@@ -1835,7 +1822,11 @@ tag this workflow just created."
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
-        run: bash scripts/tap-bump.sh "${{ needs.detect.outputs.target }}"
+        run: |
+          set -euo pipefail
+          # bump-formula-pr 只认已 tap 的 formula，runner 上必须先 tap。
+          brew tap moonfruit/tap
+          bash scripts/tap-bump.sh "${{ needs.detect.outputs.target }}"
       - name: 完成通知
         env:
           BARK_URL: ${{ secrets.BARK_URL }}

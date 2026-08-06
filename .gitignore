@@ -1,3 +1,6 @@
+# 执行计划时的临时工作区
+/.superpowers/
+
 # 本地开发环境残留（源码在 moonfruit 分支与各 tag 上）
 /sing-box
 /CLAUDE.md
