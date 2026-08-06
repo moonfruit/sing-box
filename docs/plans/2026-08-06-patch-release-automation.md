@@ -2107,45 +2107,25 @@ Expected: 输出 `v1.14.0-beta.5-reF1nd`。
 
 ---
 
-### Task 12: formula 一次性改造与仓库设置
+### Task 12: 仓库设置与凭据
 
 **Files:**
-- Modify: `/opt/homebrew/Library/Taps/moonfruit/homebrew-tap/Formula/sing-box-ref1nd.rb:3-11`
+- 无（全部是 GitHub 网页操作与推送）
 
 **Interfaces:**
 - Consumes: Task 11 建立的 `moonfruit` 分支
-- Produces: formula 指向 fork，且 `livecheck` 跟踪 `-moonfruit` tag
+- Produces: 可运行 workflow 的 fork
 
-- [ ] **Step 1: 改 formula 的四处字段**
+> **formula 的改造挪到 Task 13。** `brew bump-formula-pr` 是把新版本串替换进
+> formula **现有**的 url，而现有 url 指向 reF1nd 仓库，首次 bump 会拼出
+> `reF1nd/sing-box/archive/.../v…-moonfruit.tar.gz` —— 仓库错了。手改 formula 又
+>需要首次发布产物的 sha256。因此顺序定为：先发一次，拿到真实 url 与 sha256 后
+> 手改 formula 并自己发一次 PR，之后的版本才交给 CI 自动 bump。
+>
+> 代价：首次发布时 `tap-bump` job 会失败（url 404），并触发一次失败通知。这是
+> 预期内的一次性现象，不必修。
 
-`brew bump-formula-pr` 只会维护 `url` / `version` / `sha256`，其余需要一次性手改。
-formula 名与 class 名**不改**（改名会破坏已安装环境）；`install` / `test` /
-`service` / `bottle root_url` 全部不动。
-
-```ruby
-  homepage "https://github.com/moonfruit/sing-box"
-  url "https://github.com/moonfruit/sing-box/archive/refs/tags/v1.14.0-beta.5-reF1nd-moonfruit.tar.gz"
-  version "1.14.0-beta.5-reF1nd-moonfruit"
-  sha256 "<Task 13 首次发布后填入>"
-  license "GPL-3.0-or-later"
-  head "https://github.com/moonfruit/sing-box.git", branch: "moonfruit"
-
-  livecheck do
-    url :stable
-    regex(/^v(\d(?:\.\d+)+(-\w+(?:\.\d+)?)?-reF1nd(?:\.\d+)?-moonfruit(?:\.\d+)?)$/i)
-  end
-```
-
-- [ ] **Step 2: 校验 formula 语法**
-
-```bash
-cd /opt/homebrew/Library/Taps/moonfruit/homebrew-tap
-brew style Formula/sing-box-ref1nd.rb
-```
-
-Expected: 无 offense（`sha256` 占位会导致 `brew audit` 失败，此步只跑 style）。
-
-- [ ] **Step 3: 配置 fork 的仓库设置**
+- [ ] **Step 1: 配置 fork 的仓库设置**
 
 在 https://github.com/moonfruit/sing-box 上：
 
@@ -2158,7 +2138,7 @@ Expected: 无 offense（`sha256` 占位会导致 `brew audit` 失败，此步只
    - `BARK_URL`：形如 `https://api.day.app/<key>`
    - `CLAUDE_CODE_OAUTH_TOKEN`：本地 `claude setup-token` 生成
 
-- [ ] **Step 4: 验证版本序不倒退**
+- [ ] **Step 2: 验证版本序不倒退**
 
 ```bash
 brew ruby -e '
@@ -2169,11 +2149,12 @@ puts(Version.new("1.14.0-beta.5-reF1nd") <=> Version.new("1.14.0-beta.5-reF1nd-m
 
 Expected: `-1`（已安装的版本更旧，`brew upgrade` 会正常升级）。
 
-- [ ] **Step 5: 推送 ci 分支**
+- [ ] **Step 3: 推送两条分支**
 
 ```bash
 cd /Users/moon/Workspace.localized/go/mod/sing-box
 git push -u origin ci
+git push -u origin moonfruit    # Task 11 已在本地建好
 ```
 
 ---
@@ -2209,14 +2190,36 @@ Expected: 三个 tarball（purego / glibc / musl），notes 中列出基点链�
 
 Expected: 收到两条 —— 「已打 tag」与「发布完成」。
 
-- [ ] **Step 4: 核对并合并 tap PR**
+- [ ] **Step 4: 手改 formula 并自己发一次 PR**
+
+首次发布时 `tap-bump` job 预期失败（现有 url 指向 reF1nd 仓库），忽略它。
+拿真实产物改 formula：
 
 ```bash
-gh pr list --repo moonfruit/homebrew-tap
+TARGET=v1.14.0-beta.5-reF1nd-moonfruit
+URL="https://github.com/moonfruit/sing-box/archive/refs/tags/${TARGET}.tar.gz"
+curl -fsSL "$URL" | shasum -a 256
 ```
 
-Expected: 存在一个已打 `pr-pull` 标签的 PR，url / version / sha256 三处已更新。
-等待 tap CI 构建 bottle 并写回、合并。
+把下列字段改到位（formula 名与 class 名**不改**，改名会破坏已安装环境；
+`install` / `test` / `service` / `bottle root_url` 全部不动）：
+
+```ruby
+  homepage "https://github.com/moonfruit/sing-box"
+  url "https://github.com/moonfruit/sing-box/archive/refs/tags/v1.14.0-beta.5-reF1nd-moonfruit.tar.gz"
+  version "1.14.0-beta.5-reF1nd-moonfruit"
+  sha256 "<上一步算出的值>"
+  license "GPL-3.0-or-later"
+  head "https://github.com/moonfruit/sing-box.git", branch: "moonfruit"
+
+  livecheck do
+    url :stable
+    regex(/^v(\d(?:\.\d+)+(-\w+(?:\.\d+)?)?-reF1nd(?:\.\d+)?-moonfruit(?:\.\d+)?)$/i)
+  end
+```
+
+清空 `bottle do` 块，`brew style` 通过后按 tap 的常规流程发 PR 并打 `pr-pull`
+（即现有的 `/publish` skill）。此后的版本由 CI 的 `tap-bump` 自动接管。
 
 - [ ] **Step 5: 验证升级路径**
 
