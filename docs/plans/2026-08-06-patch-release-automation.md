@@ -1980,6 +1980,15 @@ tag this workflow just created."
     steps:
       - uses: actions/checkout@v5
         with: { ref: ci }
+      - name: 把 Homebrew 加入 PATH
+        run: |
+          set -euo pipefail
+          # ubuntu 镜像自带 Homebrew，但默认不在 PATH 上 —— 首次真跑即因
+          # `brew: command not found` 挂在这里，静态检查发现不了。
+          brew_bin=/home/linuxbrew/.linuxbrew/bin
+          [[ -x "$brew_bin/brew" ]] || { echo "::error::runner 上找不到 $brew_bin/brew" >&2; exit 1; }
+          echo "$brew_bin" >> "$GITHUB_PATH"
+
       - name: bump 并打 pr-pull
         id: bump
         env:
