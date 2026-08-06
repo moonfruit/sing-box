@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# claude 的测试替身。CLAUDE_STUB_MODE 决定它如何「解决」冲突。
+set -euo pipefail
+# 先读空 stdin：真实的 claude -p 会读取完整提示词；这里不关心内容，但必须把
+# 管道另一端（build_prompt 的 cat）写入的内容读完，否则一旦本进程提前退出、
+# 关闭读端，写端会被 SIGPIPE 杀死，在 pipefail 下把「已解决」误判为「调用失败」。
+cat >/dev/null
+case "${CLAUDE_STUB_MODE:-resolve}" in
+  resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
+  leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
+  fail)      exit 1 ;;
+esac
