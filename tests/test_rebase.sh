@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+. "$HERE/assert.sh"
+. "$HERE/fixture.sh"
+REBASE_SH="$HERE/../scripts/rebase.sh"
+
+run_in() { ( cd "$1" && shift && bash "$REBASE_SH" "$@" ); }
+
+# 干净 rebase
+d=$(mktemp -d); make_fixture "$d" clean
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+          v1.0-reF1nd "current_base：rebase 前"
+assert_ok "干净 rebase 成功" run_in "$d" v1.1-reF1nd moonfruit
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+          v1.1-reF1nd "current_base：rebase 后"
+assert_eq "$(git -C "$d" log --oneline -1 --format=%s moonfruit)" \
+          'personal patch' "patch 提交保留在顶端"
+rm -rf "$d"
+
+# 幂等：已在新基点上则跳过
+d=$(mktemp -d); make_fixture "$d" clean
+run_in "$d" v1.1-reF1nd moonfruit
+before=$(git -C "$d" rev-parse moonfruit)
+assert_ok "重复调用幂等" run_in "$d" v1.1-reF1nd moonfruit
+assert_eq "$(git -C "$d" rev-parse moonfruit)" "$before" "重复调用不改变 tip"
+rm -rf "$d"
+
+# 冲突：退出码 2，且 rebase 现场保留
+d=$(mktemp -d); make_fixture "$d" conflict
+set +e; run_in "$d" v1.1-reF1nd moonfruit >/dev/null 2>&1; rc=$?; set -e
+assert_eq "$rc" 2 "冲突时退出码为 2"
+assert_ok "冲突现场保留" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
+git -C "$d" rebase --abort
+rm -rf "$d"
+
+# 标记扫描
+d=$(mktemp -d); make_fixture "$d" clean
+printf '<<<<<<< HEAD\n' >> "$d/app.go"
+assert_fail "assert_no_markers 命中冲突标记" \
+  bash -c "cd '$d' && . '$HERE/../scripts/rebase.sh' && assert_no_markers"
+rm -rf "$d"
