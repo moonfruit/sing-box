@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 # curl 的测试替身：把 stdin 与参数记到 $CURL_STUB_LOG。
 set -euo pipefail
+[[ -z "${BARK_FAIL:-}" ]] || exit 7
 { printf 'ARGS %s\n' "$*"; printf 'BODY '; cat; printf '\n'; } >> "${CURL_STUB_LOG:?}"

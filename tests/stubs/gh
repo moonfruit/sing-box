@@ -12,5 +12,11 @@ case "${1:-}" in
         printf 'v1.14.0-alpha.43-reF1nd\nv1.14.0-beta.5-reF1nd\nv1.14.0-beta.5-reF1nd.1\n' ;;
       *) exit 1 ;;
     esac ;;
+  issue)
+    printf 'GH %s\n' "$*" >> "${GH_STUB_LOG:?}"
+    if [[ "${2:-}" == list && "${GH_STUB_MODE:-}" == issue-exists ]]; then
+      printf '7\n'
+    fi
+    ;;
   *) exit 1 ;;
 esac

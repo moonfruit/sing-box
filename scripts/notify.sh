@@ -8,14 +8,20 @@ NOTIFY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$NOTIFY_DIR/lib.sh"
 
 # bark <title> <body> <url>
+# 无论未配置端点还是推送失败，都只记录不向调用方传播 —— 通知永远不该成为
+# 发布失败的原因。调用方普遍开着 set -e，一个非零返回会直接中止整条流水线。
 bark() {
   if [[ -z "${BARK_URL:-}" ]]; then
     log "BARK_URL 未配置，跳过推送"
     return 0
   fi
-  jq -cn --arg t "$1" --arg b "$2" --arg u "$3" \
-     '{title:$t, body:$b, url:$u, group:"sing-box"}' \
-  | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$BARK_URL" >/dev/null
+  if ! jq -cn --arg t "$1" --arg b "$2" --arg u "$3" \
+       '{title:$t, body:$b, url:$u, group:"sing-box"}' \
+     | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$BARK_URL" >/dev/null
+  then
+    log "Bark 推送失败，已忽略"
+  fi
+  return 0
 }
 
 # open_or_comment_issue <target-tag> <body-file>
