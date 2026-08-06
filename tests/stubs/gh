@@ -19,10 +19,8 @@ case "${1:-}" in
     fi
     ;;
   pr)
-    case "${2:-}" in
-      list) printf '42\n' ;;
-      edit) : ;;
-      *) exit 1 ;;
-    esac ;;
+    printf 'GH %s\n' "$*" >> "${GH_STUB_LOG:?}"
+    if [[ "${2:-}" == list ]]; then printf '42\n'; fi
+    ;;
   *) exit 1 ;;
 esac
