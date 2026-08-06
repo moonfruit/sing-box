@@ -59,7 +59,7 @@
   - `tags_for_base <base-tag> <tag>... -> 该基点下的 moonfruit tag，按计数器升序，每行一个`
   - `latest_target <base-tag> <tag>... -> 计数器最大的那个，无则空`
   - `next_target <base-tag> <tag>... -> 下一个可用的 moonfruit tag`
-  - `assert_eq <actual> <expected> <label>`、`assert_ok <cmd...>`、`assert_fail <cmd...>`（`tests/assert.sh`）
+  - `assert_eq <actual> <expected> <label>`、`assert_ok <label> <cmd...>`、`assert_fail <label> <cmd...>`、`assert_contains <haystack> <needle> <label>`（`tests/assert.sh`）
 
 - [ ] **Step 1: 写失败的测试**
 
