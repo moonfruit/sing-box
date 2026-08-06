@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # gh 的测试替身。以 GH_STUB_MODE 选择返回的夹具。
+set -euo pipefail
 case "${1:-}" in
   api)
     case "${GH_STUB_MODE:-releases}:$2" in
