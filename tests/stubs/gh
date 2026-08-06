@@ -18,5 +18,11 @@ case "${1:-}" in
       printf '7\n'
     fi
     ;;
+  pr)
+    case "${2:-}" in
+      list) printf '42\n' ;;
+      edit) : ;;
+      *) exit 1 ;;
+    esac ;;
   *) exit 1 ;;
 esac
