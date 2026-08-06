@@ -875,12 +875,14 @@ start_conflict() {   # start_conflict <dir> —— 制造并停在冲突现场
 
 # claude 解决成功 → 退出 0，rebase 收尾，无标记残留
 d=$(mktemp -d); start_conflict "$d"
-CLAUDE_STUB_MODE=resolve
 assert_ok "解决成功" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "解决后落在新基点上"
 assert_eq "$(sed -n 2p "$d/app.go")" resolved "解决结果写入文件"
+# git add -A 会收拢工作树里的一切；诊断日志绝不能混进 patch 提交
+assert_eq "$(git -C "$d" show --pretty= --name-only HEAD | grep -c 'claude-resolution' || true)" \
+          0 "诊断日志未被提交进 patch"
 rm -rf "$d"
 
 # claude 留下标记 → 闸门①拦截，退出非 0，rebase 已 abort
@@ -926,7 +928,10 @@ RESOLVE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/rebase.sh
 . "$RESOLVE_DIR/rebase.sh"
 
-RESOLVE_LOG=${RESOLVE_LOG:-claude-resolution.md}
+# 日志必须落在工作树之外：resolve_conflicts 用 git add -A 收拢模型的改动，
+# 工作树内的日志会被一并提交进 patch，随发布源码永久留存并逐次增长。
+# .git/ 目录天然不在 add 的范围内。
+RESOLVE_LOG=${RESOLVE_LOG:-$(git rev-parse --git-dir 2>/dev/null || echo .)/claude-resolution.md}
 
 # build_prompt <cur_base> <new_base>
 build_prompt() {
@@ -987,6 +992,8 @@ gate_test() {
 # newly_touched <new_base> <prev_target> <cur_base>
 # 相对上一版 patch 新触及的文件。仅作报告，不作闸门 —— 硬性限制文件集会误杀
 # 「上游 API 变更导致 patch 必须适配新文件」这类合法解法。
+# 调用方（review-pr.sh 的 pr_body）保证 prev_target 非空；该基点尚无上一版时
+# 它根本不会调用本函数。
 newly_touched() {
   local new_base=$1 prev_target=$2 cur_base=$3
   comm -13 \
@@ -1193,7 +1200,8 @@ create_review_pr() {
   git push -f origin "HEAD:refs/heads/${auto_branch}"
 
   local body; body=$(mktemp)
-  pr_body "${CUR_BASE:?}" "$new" "${PREV_TARGET:-}" "$target" "${RESOLVE_LOG:-claude-resolution.md}" > "$body"
+  # RESOLVE_LOG 的默认值由 resolve.sh 在被 source 时确定（工作树之外），此处直接沿用
+  pr_body "${CUR_BASE:?}" "$new" "${PREV_TARGET:-}" "$target" "$RESOLVE_LOG" > "$body"
   gh pr create --base "$base_branch" --head "$auto_branch" \
     --title "自动解决冲突：${target}" --body-file "$body"
   rm -f "$body"
