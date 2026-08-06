@@ -1576,7 +1576,8 @@ Expected: 脚本测试全部通过，actionlint 无输出。
     if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     outputs:
-      sha: ${{ steps.run.outputs.sha }}
+      sha:       ${{ steps.run.outputs.sha }}
+      review_pr: ${{ steps.review.outputs.review_pr }}
     steps:
       - uses: actions/checkout@v5
         with: { ref: ci, path: ci }
@@ -1624,7 +1625,8 @@ Expected: 脚本测试全部通过，actionlint 无输出。
           bash ../ci/scripts/resolve.sh \
             "${{ needs.detect.outputs.cur_base }}" "${{ needs.detect.outputs.base }}"
 
-      - name: 开审查 PR 并中止本次发布
+      - name: 开审查 PR
+        id: review
         if: steps.rebase.outcome == 'failure' && steps.resolve.outcome == 'success'
         working-directory: src
         env:
@@ -1637,9 +1639,15 @@ Expected: 脚本测试全部通过，actionlint 无输出。
           . ../ci/scripts/notify.sh
           url=$(bash ../ci/scripts/review-pr.sh \
                   "${{ needs.detect.outputs.base }}" "${{ needs.detect.outputs.target }}")
+          echo "review_pr=${url}" >> "$GITHUB_OUTPUT"
           bark "冲突已自动解决，待审查" \
                "${{ needs.detect.outputs.target }}：在 PR 内评论 /ship 放行" "$url"
-          exit 1
+
+      # 中止单独成步：上一步必须成功结束，review_pr 这个 output 才会被记录下来，
+      # notify-failure 才能据此把「有意中止」与「真失败」区分开。
+      - name: 已开审查 PR，中止本次发布
+        if: steps.review.outcome == 'success'
+        run: exit 1
 
       - name: 冲突未能自动解决
         if: steps.rebase.outcome == 'failure' && steps.resolve.outcome == 'failure'
@@ -1885,7 +1893,10 @@ tag this workflow just created."
           BASE:     ${{ needs.detect.outputs.base }}
         run: |
           set -euo pipefail
-          git fetch --tags --quiet
+          # $BASE 是 reF1nd 的 tag，从未推到本仓库；不取回它，下面的 git log 区间
+          # 无法解析，整个 release job 会在生成 notes 时就挂掉。
+          git remote add ref1nd "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --tags --quiet ref1nd
           notes=$(mktemp)
           {
             printf '基于 [`%s`](https://github.com/%s/releases/tag/%s) 构建。\n\n' \
@@ -1973,10 +1984,13 @@ tag this workflow just created."
   notify-failure:
     name: 失败通知
     needs: [detect, prepare, build, release, gitee-push, tap-bump]
-    # 只用 failure()，不再叠加 should_build 守卫：无需构建又无失败时 failure() 本就
+    # 只用 failure()，不叠加 should_build 守卫：无需构建又无失败时 failure() 本就
     # 不成立，那个守卫唯一的实际效果是吞掉 detect 自身崩溃时的通知 —— 而每日 cron
     # 悄无声息地停摆，恰恰是最该被告知的故障。
-    if: failure()
+    #
+    # 但要排除「自动解冲突成功、已开审查 PR」这条故意 exit 1 的路径：那不是故障，
+    # 而且 PR 本身就是通知载体，再开 issue 违反「开了 PR 就不再开 issue」。
+    if: failure() && needs.prepare.outputs.review_pr == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
