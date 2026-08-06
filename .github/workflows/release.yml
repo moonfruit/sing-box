@@ -132,7 +132,13 @@ jobs:
       - uses: actions/checkout@v5
         with: { ref: ci, path: ci }
       - uses: actions/checkout@v5
-        with: { fetch-depth: 0, path: src }
+        with:
+          fetch-depth: 0
+          path: src
+          # 集成分支与冲突路径的临时分支都带着上游的 .github/workflows/，
+          # 而 GITHUB_TOKEN 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，
+          # 且没有任何 permissions: 键能授予该能力。必须用带 workflow scope 的 PAT。
+          token: ${{ secrets.FORK_PUSH_TOKEN }}
       - uses: actions/setup-go@v5
         with: { go-version: "${{ env.GO_VERSION }}" }
 
