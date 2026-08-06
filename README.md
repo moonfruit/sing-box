@@ -17,6 +17,9 @@ sing-box 源码在别的 ref 上：
 
 ## 常用操作
 
+下列命令假定本 fork 是 `origin`。若你的 checkout 里 `origin` 指向上游
+（sing-box 的开发副本常常如此），把命令里的 `origin` 换成 fork 对应的远端名。
+
 ```bash
 # 同步集成分支（会被 CI force-push）
 git fetch origin && git reset --hard origin/moonfruit

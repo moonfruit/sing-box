@@ -2149,12 +2149,14 @@ puts(Version.new("1.14.0-beta.5-reF1nd") <=> Version.new("1.14.0-beta.5-reF1nd-m
 
 Expected: `-1`（已安装的版本更旧，`brew upgrade` 会正常升级）。
 
-- [ ] **Step 3: 推送两条分支**
+- [x] **Step 3: 推送两条分支**（已完成）
+
+注意本地 checkout 的远端命名：`origin` 指向上游 SagerNet，fork 是 `moonfruit`。
 
 ```bash
 cd /Users/moon/Workspace.localized/go/mod/sing-box
-git push -u origin ci
-git push -u origin moonfruit    # Task 11 已在本地建好
+git push -u moonfruit refs/heads/ci:refs/heads/ci
+git push -u moonfruit refs/heads/moonfruit:refs/heads/moonfruit
 ```
 
 ---
