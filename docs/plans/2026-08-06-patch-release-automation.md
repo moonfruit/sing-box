@@ -843,6 +843,10 @@ to look at."
 #!/usr/bin/env bash
 # claude 的测试替身。CLAUDE_STUB_MODE 决定它如何「解决」冲突。
 set -euo pipefail
+# 先读空 stdin：真实的 claude -p 会读取完整提示词；这里不关心内容，但必须把
+# 管道另一端（build_prompt 的 cat）写入的内容读完，否则一旦本进程提前退出、
+# 关闭读端，写端会被 SIGPIPE 杀死，在 pipefail 下把「已解决」误判为「调用失败」。
+cat >/dev/null
 case "${CLAUDE_STUB_MODE:-resolve}" in
   resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
   leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
@@ -962,7 +966,10 @@ PROMPT
 
 gate_markers() {
   log "闸门①：冲突标记扫描"
-  assert_no_markers
+  # assert_no_markers 命中标记时会调用 die（内部直接 exit），
+  # 必须包一层子 shell，否则会连带炸穿本脚本，
+  # 让 resolve_conflicts 里紧随其后的 ORIG_HEAD 回退永远执行不到。
+  ( assert_no_markers )
 }
 
 gate_build() {
@@ -993,8 +1000,10 @@ resolve_conflicts() {
   while [[ -d "$(git rev-parse --git-path rebase-merge)" ]]; do
     (( ++guard <= 50 )) || { git rebase --abort; die "冲突轮次超过 50，放弃"; }
 
+    # prompt 走 stdin：--allowedTools 一类的变长参数会吞掉后面的位置参数，
+    # 从管道喂入可以完全绕开这个坑。
     if ! build_prompt "$cur" "$new" \
-         | claude -p --dangerously-skip-permissions >> "$RESOLVE_LOG"; then
+         | claude -p --permission-mode auto >> "$RESOLVE_LOG"; then
       git rebase --abort
       log "claude 调用失败"
       return 1
