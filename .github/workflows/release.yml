@@ -347,3 +347,112 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 7
+
+  release:
+    name: 发布
+    needs: [detect, prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v5
+        with: { path: dist, merge-multiple: true }
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+          BASE:     ${{ needs.detect.outputs.base }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --quiet
+          notes=$(mktemp)
+          {
+            # shellcheck disable=SC2016
+            printf '基于 [`%s`](https://github.com/%s/releases/tag/%s) 构建。\n\n' \
+              "$BASE" "$UPSTREAM_REPO" "$BASE"
+            printf '本版包含的 patch：\n\n'
+            git log --format='- %s' "${BASE}..${TARGET}"
+          } > "$notes"
+          gh release create "$TARGET" --title "$TARGET" --notes-file "$notes" dist/*.tar.gz
+
+  gitee-push:
+    name: 推送 Gitee
+    needs: [detect, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载 musl 产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TARGET" --pattern '*linux-arm64-musl.tar.gz' --dir dist
+      - name: 强推 binary 分支
+        env:
+          GITEE_USER:  ${{ secrets.GITEE_USER }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TARGET:      ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_USER"  || { echo "::error::GITEE_USER 缺失" >&2; exit 1; }
+          test -n "$GITEE_TOKEN" || { echo "::error::GITEE_TOKEN 缺失" >&2; exit 1; }
+          work=$(mktemp -d)
+          cp dist/sing-box-*-linux-arm64-musl.tar.gz "$work/"
+          printf '%s\n' "${TARGET#v}" > "$work/version.txt"
+          cd "$work"
+          git init -q -b binary
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -q -m "sing-box ${TARGET} linux-arm64-musl"
+          git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/moonfruit/private.git"
+          git push --progress --verbose -f gitee binary
+
+  tap-bump:
+    name: 更新 Homebrew tap
+    needs: [detect, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: ci }
+      - name: bump 并打 pr-pull
+        id: bump
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          # bump-formula-pr 只认已 tap 的 formula，runner 上必须先 tap。
+          brew tap moonfruit/tap
+          bash scripts/tap-bump.sh "${{ needs.detect.outputs.target }}"
+      - name: 完成通知
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          . scripts/notify.sh
+          bark "${TARGET} 发布完成" "tap PR 已开并打上 pr-pull" "${{ steps.bump.outputs.tap_pr }}"
+
+  notify-failure:
+    name: 失败通知
+    needs: [detect, prepare, build, release, gitee-push, tap-bump]
+    if: failure() && needs.detect.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: ci }
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          BARK_URL: ${{ secrets.BARK_URL }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          . scripts/notify.sh
+          body=$(mktemp)
+          # shellcheck disable=SC2016
+          printf '发布 `%s` 失败。\n\nActions run: %s\n' "$TARGET" "$RUN_URL" > "$body"
+          open_or_comment_issue "$TARGET" "$body"
+          bark "发布失败：${TARGET}" "见 Actions run" "$RUN_URL"
