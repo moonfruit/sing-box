@@ -289,17 +289,8 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # latest_upstream_tag 走 gh stub，见 tests/stubs/gh
 PATH="$HERE/stubs:$PATH"
 
-# stub 是子进程，必须 export；且不能写成 `VAR=x assert_eq "$(f)"` ——
-# 命令替换先于该前缀赋值求值，变量传不进 f。
-export GH_STUB_MODE=releases
 assert_eq "$(latest_upstream_tag)" \
-  v1.14.0-beta.5-reF1nd "latest_upstream_tag：取最新 Release"
-
-export GH_STUB_MODE=no-releases
-assert_eq "$(latest_upstream_tag)" \
-  v1.14.0-beta.5-reF1nd.1 "latest_upstream_tag：无 Release 时回退 tag 列表，且不漏 -reF1nd.1"
-
-unset GH_STUB_MODE
+  v1.14.0-beta.5-reF1nd.1 "latest_upstream_tag：按版本序取首个，且不漏 -reF1nd.1"
 
 # decide_build <base> <cur_base> <branch_sha> <latest_target_sha> <force>
 assert_eq "$(decide_build v1.1-reF1nd v1.0-reF1nd aaa aaa false)" true  "上游出新版 → 构建"
@@ -313,17 +304,15 @@ assert_eq "$(decide_build v1.0-reF1nd v1.0-reF1nd aaa aaa true)"  true  "force �
 
 ```bash
 #!/usr/bin/env bash
-# gh 的测试替身。以 GH_STUB_MODE 选择返回的夹具。
+# gh 的测试替身。
 set -euo pipefail
 case "${1:-}" in
   api)
-    case "${GH_STUB_MODE:-releases}:$2" in
-      releases:repos/reF1nd/sing-box/releases*)
-        printf 'v1.14.0-beta.5-reF1nd\n' ;;
-      no-releases:repos/reF1nd/sing-box/releases*)
-        exit 1 ;;
-      *:repos/reF1nd/sing-box/tags*)
-        printf 'v1.14.0-alpha.43-reF1nd\nv1.14.0-beta.5-reF1nd\nv1.14.0-beta.5-reF1nd.1\n' ;;
+    case "$2" in
+      # 夹具里混入一个 -reF1nd-moonfruit：它不以 -reF1nd[.N] 结尾，
+      # 必须被过滤掉，否则我们自己的发布 tag 会被当成上游基点。
+      repos/reF1nd/sing-box/tags*)
+        printf 'v1.14.0-alpha.43-reF1nd\nv1.14.0-beta.5-reF1nd\nv1.14.0-beta.5-reF1nd.1\nv1.14.0-beta.9-reF1nd-moonfruit\n' ;;
       *) exit 1 ;;
     esac ;;
   *) exit 1 ;;
@@ -362,17 +351,17 @@ DETECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 UPSTREAM_REPO=${UPSTREAM_REPO:-reF1nd/sing-box}
 INTEGRATION_BRANCH=${INTEGRATION_BRANCH:-moonfruit}
 
-# latest_upstream_tag —— reF1nd 最新发布的 tag。
-# 以 Release 的发布顺序为准（最忠实于实际发布），无 Release 时回退 tag 列表按版本排序。
-# 回退路径用正则而非 endswith，否则会漏掉 -reF1nd.1 这类修订 tag。
+# latest_upstream_tag —— reF1nd 最新的 tag。
+#
+# 不读 Release 列表：reF1nd 只打 tag、从不发布 Release，该路径实测恒为空。
+# 留着它反而是隐患 —— 一旦上游哪天开始发 Release，检测依据会毫无征兆地改变。
+#
+# 用正则而非 endswith("-reF1nd")：后者会漏掉 -reF1nd.1 这类修订 tag。
 latest_upstream_tag() {
   local tag
-  tag=$(gh api "repos/${UPSTREAM_REPO}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null) || tag=
-  if [[ -z "$tag" || "$tag" == "null" ]]; then
-    tag=$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=100" --paginate \
-            --jq '.[].name | select(test("-reF1nd(\\.[0-9]+)?$"))' \
-          | sort -V -r | head -n1)
-  fi
+  tag=$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=100" --paginate \
+          --jq '.[].name | select(test("-reF1nd(\\.[0-9]+)?$"))' \
+        | sort -V -r | head -n1)
   [[ -n "$tag" ]] || die "未能确定 ${UPSTREAM_REPO} 的最新 tag"
   printf '%s\n' "$tag"
 }
@@ -2131,7 +2120,9 @@ Expected: 输出 `v1.14.0-beta.5-reF1nd`。
 
 1. Settings → Actions → General → 启用 Actions
 2. Settings → General → Default branch → 改为 `ci`
-3. Issues → Labels → 新建 `release-conflict`
+3. Settings → General → Features → **勾选 Issues**（fork 默认关闭；`open_or_comment_issue`
+   是冲突与构建失败的主要落地渠道，关着的话那条通知路径会直接失败）
+4. Issues → Labels → 新建 `release-conflict`
 4. Settings → Secrets and variables → Actions，添加：
    - `HOMEBREW_GITHUB_API_TOKEN`：PAT，需对 `moonfruit/homebrew-tap` 有 `repo` 权限
    - `GITEE_USER` / `GITEE_TOKEN`：从 `moonfruit/sing-box-release` 的 secrets 复制

@@ -105,9 +105,11 @@ detect ──► rebase ──► build (matrix ×3) ──► release ──┬
 
 ### 5.1 detect
 
-1. 取 reF1nd 最新 tag 为 `BASE`：读 `gh api /repos/reF1nd/sing-box/releases --jq '.[0].tag_name'`（按发布时间，最忠实于 reF1nd 的实际发布顺序）。若无 Release 则回退到 tag 列表并以正则 `-reF1nd(\.\d+)?$` 过滤后 `sort -V -r`。
+1. 取 reF1nd 最新 tag 为 `BASE`：读 tag 列表，以正则 `-reF1nd(\.\d+)?$` 过滤后 `sort -V -r` 取首个。
 
-   注：迁移前 `sing-box-release` 用的是 `endswith("-reF1nd")`，会漏掉 `-reF1nd.1` 形式的修订 tag，本方案修正之。
+   **不读 Release 列表**：reF1nd 只打 tag、从不发布 Release，该路径实测恒为空。留着它反而是隐患 —— 一旦上游哪天开始发 Release，检测依据会毫无征兆地改变。
+
+   用正则而非 `endswith("-reF1nd")`：后者会漏掉 `-reF1nd.1` 形式的修订 tag，这正是迁移前 `sing-box-release` 踩过的坑。
 
 2. 取集成分支当前基点：`CUR_BASE=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)`。
 
