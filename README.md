@@ -22,7 +22,7 @@ sing-box 源码在别的 ref 上：
 git fetch origin && git reset --hard origin/moonfruit
 
 # 增删改 patch
-git rebase -i $(git describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)
+git rebase -i $(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)
 git push -f origin moonfruit
 
 # 冲突时人工 rebase

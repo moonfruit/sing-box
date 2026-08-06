@@ -388,7 +388,7 @@ main() {
   [[ -n "$base" ]] || base=$(latest_upstream_tag)
 
   local existing; mapfile -t existing < <(git tag --list '*-moonfruit' '*-moonfruit.*')
-  local cur_base; cur_base=$(git describe --tags --match '*-reF1nd*' --abbrev=0 "$INTEGRATION_BRANCH")
+  local cur_base; cur_base=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "$INTEGRATION_BRANCH")
   local branch_sha; branch_sha=$(git rev-parse "$INTEGRATION_BRANCH")
 
   local prev; prev=$(latest_target "$base" "${existing[@]}")
@@ -510,10 +510,10 @@ run_in() { ( cd "$1" && shift && bash "$REBASE_SH" "$@" ); }
 
 # 干净 rebase
 d=$(mktemp -d); make_fixture "$d" clean
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.0-reF1nd "current_base：rebase 前"
 assert_ok "干净 rebase 成功" run_in "$d" v1.1-reF1nd moonfruit
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "current_base：rebase 后"
 assert_eq "$(git -C "$d" log --oneline -1 --format=%s moonfruit)" \
           'personal patch' "patch 提交保留在顶端"
@@ -533,6 +533,19 @@ set +e; run_in "$d" v1.1-reF1nd moonfruit >/dev/null 2>&1; rc=$?; set -e
 assert_eq "$rc" 2 "冲突时退出码为 2"
 assert_ok "冲突现场保留" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
 git -C "$d" rebase --abort
+rm -rf "$d"
+
+# 已存在 moonfruit tag 时，基点解析绝不能匹配到 tag 自己 ——
+# 否则 rebase 区间为空，patch 会被静默丢弃而三道闸门全会放行
+d=$(mktemp -d); make_fixture "$d" clean
+git -C "$d" tag v1.0-reF1nd-moonfruit moonfruit
+assert_eq "$(cd "$d" && . "$HERE/../scripts/rebase.sh" && current_base moonfruit)" \
+          v1.0-reF1nd "current_base 跳过 moonfruit tag 自身"
+run_in "$d" v1.1-reF1nd moonfruit
+assert_eq "$(git -C "$d" rev-list --count v1.1-reF1nd..moonfruit)" \
+          1 "已有 moonfruit tag 时 patch 未被丢弃"
+assert_eq "$(git -C "$d" log --oneline -1 --format=%s moonfruit)" \
+          'personal patch' "存活的正是那个 patch 提交"
 rm -rf "$d"
 
 # 标记扫描
@@ -568,8 +581,12 @@ REBASE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 # current_base <branch> —— 从 git 历史反查当前基点，而非从 tag 名推导。
 # 这使得 rebase 步骤幂等：人工已在本地 rebase 并推送时，CI 重跑会自动跳过。
+#
+# --exclude 不可省：moonfruit tag 形如 <基点>-moonfruit[.N]，本身也匹配 *-reF1nd*。
+# 少了它，第一个 moonfruit tag 出现后基点会解析成 tag 自己，rebase --onto 的区间
+# 变成空区间，patch 被静默全部丢弃 —— 而三道闸门全会放行（无标记、能编译、测试过）。
 current_base() {
-  git describe --tags --match '*-reF1nd*' --abbrev=0 "${1:-moonfruit}"
+  git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "${1:-moonfruit}"
 }
 
 # assert_no_markers —— 打 tag 前的硬性检查。已核对 reF1nd 源码树不含此类行，不会误报。
@@ -877,7 +894,7 @@ start_conflict() {   # start_conflict <dir> —— 制造并停在冲突现场
 d=$(mktemp -d); start_conflict "$d"
 assert_ok "解决成功" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "解决后落在新基点上"
 assert_eq "$(sed -n 2p "$d/app.go")" resolved "解决结果写入文件"
 # git add -A 会收拢工作树里的一切；诊断日志绝不能混进 patch 提交
@@ -890,7 +907,7 @@ d=$(mktemp -d); start_conflict "$d"
 assert_fail "标记残留被拦截" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=leave SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_fail "rebase 现场已清理" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.0-reF1nd "abort 后基点回到原处"
 rm -rf "$d"
 

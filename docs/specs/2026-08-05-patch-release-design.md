@@ -109,7 +109,11 @@ detect ──► rebase ──► build (matrix ×3) ──► release ──┬
 
    注：迁移前 `sing-box-release` 用的是 `endswith("-reF1nd")`，会漏掉 `-reF1nd.1` 形式的修订 tag，本方案修正之。
 
-2. 取集成分支当前基点：`CUR_BASE=$(git describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)`。
+2. 取集成分支当前基点：`CUR_BASE=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)`。
+
+   `--exclude` 不可省：moonfruit tag 形如 `<基点>-moonfruit[.N]`，本身也匹配 `*-reF1nd*`。
+   少了它，第一个 moonfruit tag 出现后基点就会解析成 tag 自己，rebase 区间变成空区间，
+   **patch 被静默全部丢弃**，且三道闸门全会放行（无标记、能编译、测试过）。
 3. 生成目标 tag `TARGET`（见 §3）。
 4. `should_build` 为真的条件（任一）：
    - `CUR_BASE != BASE`（上游出新版）
@@ -119,7 +123,7 @@ detect ──► rebase ──► build (matrix ×3) ──► release ──┬
 ### 5.2 rebase
 
 ```bash
-CUR_BASE=$(git describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)
+CUR_BASE=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)
 if [ "$CUR_BASE" != "$BASE" ]; then
   git rebase --onto "$BASE" "$CUR_BASE" moonfruit || <进入冲突流程，见 §6>
 fi
