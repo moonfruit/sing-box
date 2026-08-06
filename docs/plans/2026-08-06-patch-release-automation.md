@@ -309,10 +309,30 @@ set -euo pipefail
 case "${1:-}" in
   api)
     case "$2" in
-      # 夹具里混入一个 -reF1nd-moonfruit：它不以 -reF1nd[.N] 结尾，
-      # 必须被过滤掉，否则我们自己的发布 tag 会被当成上游基点。
+      # 夹具里混入一个 -reF1nd-moonfruit：它不以 -reF1nd[.N] 结尾，必须被过滤掉，
+      # 否则我们自己的发布 tag 会被当成上游基点。它在版本序里排最高，正则一旦
+      # 放松就会被选中，断言随即变红。
+      #
+      # 真跑调用方传来的 --jq 过滤条件，而不是自己重新实现一遍：stub 若只按端点
+      # 返回固定文本，被测的正则根本不会被执行，断言只是「正确答案恰好排在最前」
+      # 而通过 —— 这正是本项目此处踩过的坑。
       repos/reF1nd/sing-box/tags*)
-        printf 'v1.14.0-alpha.43-reF1nd\nv1.14.0-beta.5-reF1nd\nv1.14.0-beta.5-reF1nd.1\nv1.14.0-beta.9-reF1nd-moonfruit\n' ;;
+        shift 2
+        filter=
+        while [[ $# -gt 0 ]]; do
+          if [[ "$1" == --jq ]]; then filter=${2:?"stub: --jq 缺少参数"}; break; fi
+          shift
+        done
+        [[ -n "$filter" ]] || filter='.[].name'
+        jq -r "$filter" <<'JSON'
+[
+  {"name": "v1.14.0-alpha.43-reF1nd"},
+  {"name": "v1.14.0-beta.5-reF1nd"},
+  {"name": "v1.14.0-beta.5-reF1nd.1"},
+  {"name": "v1.14.0-beta.9-reF1nd-moonfruit"}
+]
+JSON
+        ;;
       *) exit 1 ;;
     esac ;;
   *) exit 1 ;;
