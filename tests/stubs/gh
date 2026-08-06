@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# gh 的测试替身。以 GH_STUB_MODE 选择返回的夹具。
+case "${1:-}" in
+  api)
+    case "${GH_STUB_MODE:-releases}:$2" in
+      releases:repos/reF1nd/sing-box/releases*)
+        printf 'v1.14.0-beta.5-reF1nd\n' ;;
+      no-releases:repos/reF1nd/sing-box/releases*)
+        exit 1 ;;
+      *:repos/reF1nd/sing-box/tags*)
+        printf 'v1.14.0-alpha.43-reF1nd\nv1.14.0-beta.5-reF1nd\nv1.14.0-beta.5-reF1nd.1\n' ;;
+      *) exit 1 ;;
+    esac ;;
+  *) exit 1 ;;
+esac
