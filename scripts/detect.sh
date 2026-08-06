@@ -8,6 +8,10 @@ DETECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$DETECT_DIR/lib.sh"
 # shellcheck source=scripts/version.sh
 . "$DETECT_DIR/version.sh"
+# current_base 归 rebase.sh 所有。基点解析出错会静默丢弃全部 patch 且三道闸门
+# 都放行，这种逻辑只能有一份实现、由一处回归测试守着。
+# shellcheck source=scripts/rebase.sh
+. "$DETECT_DIR/rebase.sh"
 
 UPSTREAM_REPO=${UPSTREAM_REPO:-reF1nd/sing-box}
 INTEGRATION_BRANCH=${INTEGRATION_BRANCH:-moonfruit}
@@ -42,7 +46,7 @@ main() {
   [[ -n "$base" ]] || base=$(latest_upstream_tag)
 
   local existing; mapfile -t existing < <(git tag --list '*-moonfruit' '*-moonfruit.*')
-  local cur_base; cur_base=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "$INTEGRATION_BRANCH")
+  local cur_base; cur_base=$(current_base "$INTEGRATION_BRANCH")
   local branch_sha; branch_sha=$(git rev-parse "$INTEGRATION_BRANCH")
 
   local prev; prev=$(latest_target "$base" "${existing[@]}")
