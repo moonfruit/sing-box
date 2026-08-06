@@ -1291,19 +1291,19 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 PATH="$HERE/stubs:$PATH"
 BREW_STUB_LOG=$(mktemp); export BREW_STUB_LOG
-GH_STUB_MODE=tap; export GH_STUB_MODE
 
 tap_bump v1.14.0-beta.5-reF1nd-moonfruit >/dev/null
 logged=$(cat "$BREW_STUB_LOG")
 
-assert_contains "$logged" "bump-formula-pr"                        "调用 bump-formula-pr"
-assert_contains "$logged" -- "--version=1.14.0-beta.5-reF1nd-moonfruit" "版本号去掉了前导 v"
-assert_contains "$logged" "moonfruit/tap/sing-box-ref1nd"          "目标 formula 正确"
-assert_contains "$logged" -- "--no-browse"                         "不打开浏览器"
+assert_contains "$logged" "bump-formula-pr"                             "调用 bump-formula-pr"
+assert_contains "$logged" "--version=1.14.0-beta.5-reF1nd-moonfruit"    "版本号去掉了前导 v"
+assert_contains "$logged" "moonfruit/tap/sing-box-ref1nd"               "目标 formula 正确"
+assert_contains "$logged" "--no-browse"                                 "不打开浏览器"
 rm -f "$BREW_STUB_LOG"
 ```
 
-同时在 `tests/stubs/gh` 的 `case` 中追加分支，使 `pr list` 在 `GH_STUB_MODE=tap` 时返回 `42`，`pr edit` 直接成功：
+同时在 `tests/stubs/gh` 的 `case` 中追加 `pr` 分支（`api` 与 `issue` 分支保持不变），
+让 `pr list` 返回一个 PR 号、`pr edit` 直接成功：
 
 ```bash
   pr)
