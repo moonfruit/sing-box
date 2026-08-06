@@ -15,17 +15,18 @@ GH_STUB_LOG=$(mktemp); export GH_STUB_LOG
 
 out=$(tap_bump v1.14.0-beta.5-reF1nd-moonfruit)
 logged=$(cat "$BREW_STUB_LOG")
-gh_logged=$(cat "$GH_STUB_LOG")
 
 assert_contains "$logged" "bump-formula-pr"                             "调用 bump-formula-pr"
 assert_contains "$logged" "--version=1.14.0-beta.5-reF1nd-moonfruit"    "版本号去掉了前导 v"
 assert_contains "$logged" "moonfruit/tap/sing-box-ref1nd"               "目标 formula 正确"
 assert_contains "$logged" "--no-browse"                                 "不打开浏览器"
 
-# 打标签这一步是 tap 构建 bottle 的触发器，必须逐项守住
-assert_contains "$gh_logged" "pr edit 42"                    "对检索到的 PR 号打标签"
-assert_contains "$gh_logged" "--add-label pr-pull"           "标签正是 pr-pull"
-assert_contains "$gh_logged" "--repo moonfruit/homebrew-tap" "作用在 tap 仓库上"
+# 打标签这一步是 tap 构建 bottle 的触发器。这里对 pr edit 那一行做整行精确匹配，
+# 而不是在整块日志上做子串匹配：子串匹配挡不住把标签写成 pr-pulled，也挡不住
+# 漏掉 pr edit 的 --repo（因为 pr list 那行本来就带着一个正确的 --repo）。
+assert_eq "$(grep '^GH pr edit' "$GH_STUB_LOG")" \
+          "GH pr edit 42 --repo moonfruit/homebrew-tap --add-label pr-pull" \
+          "打标签的调用与预期逐字相符"
 assert_contains "$out" "tap_pr=https://github.com/moonfruit/homebrew-tap/pull/42" \
                                                              "输出 tap PR 链接"
 
