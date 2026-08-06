@@ -1973,7 +1973,10 @@ tag this workflow just created."
   notify-failure:
     name: 失败通知
     needs: [detect, prepare, build, release, gitee-push, tap-bump]
-    if: failure() && needs.detect.outputs.should_build == 'true'
+    # 只用 failure()，不再叠加 should_build 守卫：无需构建又无失败时 failure() 本就
+    # 不成立，那个守卫唯一的实际效果是吞掉 detect 自身崩溃时的通知 —— 而每日 cron
+    # 悄无声息地停摆，恰恰是最该被告知的故障。
+    if: failure()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -1981,7 +1984,8 @@ tag this workflow just created."
       - env:
           GH_TOKEN: ${{ github.token }}
           BARK_URL: ${{ secrets.BARK_URL }}
-          TARGET:   ${{ needs.detect.outputs.target }}
+          # detect 崩溃时 target 为空，给个兜底文案，issue 标题才不会是半截
+          TARGET:   ${{ needs.detect.outputs.target || '目标 tag 未能确定' }}
           RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
