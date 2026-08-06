@@ -84,8 +84,10 @@ resolve_conflicts() {
   while [[ -d "$(git rev-parse --git-path rebase-merge)" ]]; do
     (( ++guard <= 50 )) || { git rebase --abort; die "冲突轮次超过 50，放弃"; }
 
+    # prompt 走 stdin：--allowedTools 一类的变长参数会吞掉后面的位置参数，
+    # 从管道喂入可以完全绕开这个坑。
     if ! build_prompt "$cur" "$new" \
-         | claude -p --dangerously-skip-permissions >> "$RESOLVE_LOG"; then
+         | claude -p --permission-mode auto >> "$RESOLVE_LOG"; then
       git rebase --abort
       log "claude 调用失败"
       return 1
