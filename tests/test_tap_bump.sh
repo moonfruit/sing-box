@@ -8,6 +8,10 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PATH="$HERE/stubs:$PATH"
 BREW_STUB_LOG=$(mktemp); export BREW_STUB_LOG
 
+# 测试自带凭据：tap_bump 用 ${HOMEBREW_GITHUB_API_TOKEN:?} 断言其存在，
+# 不自带就只在开发机恰好导出了真实 PAT 时才通过。值无所谓，brew 与 gh 都是 stub。
+export HOMEBREW_GITHUB_API_TOKEN=stub-token
+
 tap_bump v1.14.0-beta.5-reF1nd-moonfruit >/dev/null
 logged=$(cat "$BREW_STUB_LOG")
 
