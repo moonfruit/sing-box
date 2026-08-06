@@ -159,10 +159,11 @@ Release notes 写明：基点 reF1nd tag（含链接）、patch 提交清单（`
 在 runner 上使用自带的 Homebrew：
 
 ```bash
-HOMEBREW_GITHUB_API_TOKEN=${MF_TOKEN} \
-  brew bump-formula-pr --version="${TARGET#v}" --no-audit --no-browse \
-    moonfruit/tap/sing-box-ref1nd
-gh pr edit <PR> --repo moonfruit/homebrew-tap --add-label pr-pull
+export HOMEBREW_GITHUB_API_TOKEN=${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+brew bump-formula-pr --version="${TARGET#v}" --no-audit --no-browse \
+  moonfruit/tap/sing-box-ref1nd
+GH_TOKEN=$HOMEBREW_GITHUB_API_TOKEN \
+  gh pr edit <PR> --repo moonfruit/homebrew-tap --add-label pr-pull
 ```
 
 只传 `--version` 即可：brew 用新版本串替换 formula 中 url 里的旧版本串，再下载计算 sha256。前提是 url 内含完整版本串 —— 本方案的 url 形如 `.../tags/v${version}.tar.gz`，成立。
@@ -279,7 +280,7 @@ issue 正文含冲突文件、claude 的尝试结果、人工解决命令（§6.
 
 | Secret | 用途 |
 | --- | --- |
-| `MF_TOKEN` | PAT。tap-bump 跨仓库向 moonfruit/homebrew-tap 开 PR 并打标签（`GITHUB_TOKEN` 够不到其它仓库）。fork 内部的操作一律用 `GITHUB_TOKEN` |
+| `HOMEBREW_GITHUB_API_TOKEN` | PAT。tap-bump 跨仓库向 moonfruit/homebrew-tap 开 PR 并打标签（`GITHUB_TOKEN` 够不到其它仓库）。取此名是为了直接作为 `brew` 认得的环境变量注入。fork 内部的操作一律用 `GITHUB_TOKEN` |
 | `GITEE_USER` / `GITEE_TOKEN` | Gitee `binary` 分支推送（自 sing-box-release 迁移） |
 | `BARK_URL` | Bark 推送端点 |
 | `CLAUDE_CODE_OAUTH_TOKEN` | CI 内 `claude -p` 自动解冲突（`claude setup-token` 生成） |
