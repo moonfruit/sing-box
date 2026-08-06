@@ -1576,8 +1576,9 @@ Expected: 脚本测试全部通过，actionlint 无输出。
     if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     outputs:
-      sha:       ${{ steps.run.outputs.sha }}
-      review_pr: ${{ steps.review.outputs.review_pr }}
+      sha: ${{ steps.run.outputs.sha }}
+      # prepare 自己已经发过专属通知的路径，notify-failure 据此避让
+      notified: ${{ steps.review.outputs.notified || steps.conflict.outputs.notified }}
     steps:
       - uses: actions/checkout@v5
         with: { ref: ci, path: ci }
@@ -1639,17 +1640,18 @@ Expected: 脚本测试全部通过，actionlint 无输出。
           . ../ci/scripts/notify.sh
           url=$(bash ../ci/scripts/review-pr.sh \
                   "${{ needs.detect.outputs.base }}" "${{ needs.detect.outputs.target }}")
-          echo "review_pr=${url}" >> "$GITHUB_OUTPUT"
           bark "冲突已自动解决，待审查" \
                "${{ needs.detect.outputs.target }}：在 PR 内评论 /ship 放行" "$url"
+          echo "notified=review-pr" >> "$GITHUB_OUTPUT"
 
-      # 中止单独成步：上一步必须成功结束，review_pr 这个 output 才会被记录下来，
+      # 中止单独成步：上一步必须成功结束，notified 这个 output 才会被记录下来，
       # notify-failure 才能据此把「有意中止」与「真失败」区分开。
       - name: 已开审查 PR，中止本次发布
         if: steps.review.outcome == 'success'
         run: exit 1
 
       - name: 冲突未能自动解决
+        id: conflict
         if: steps.rebase.outcome == 'failure' && steps.resolve.outcome == 'failure'
         working-directory: src
         env:
@@ -1675,7 +1677,12 @@ Expected: 脚本测试全部通过，actionlint 无输出。
           open_or_comment_issue "${{ needs.detect.outputs.target }}" "$body"
           bark "rebase 冲突待人工处理" "${{ needs.detect.outputs.target }}" \
                "${{ github.server_url }}/${{ github.repository }}/issues"
-          exit 1
+          echo "notified=conflict" >> "$GITHUB_OUTPUT"
+
+      # 同样把中止拆出来，理由与上面那条一致
+      - name: 冲突已通知，中止本次发布
+        if: steps.conflict.outcome == 'success'
+        run: exit 1
 
       - name: 推送集成分支与 tag
         id: run
@@ -1988,9 +1995,10 @@ tag this workflow just created."
     # 不成立，那个守卫唯一的实际效果是吞掉 detect 自身崩溃时的通知 —— 而每日 cron
     # 悄无声息地停摆，恰恰是最该被告知的故障。
     #
-    # 但要排除「自动解冲突成功、已开审查 PR」这条故意 exit 1 的路径：那不是故障，
-    # 而且 PR 本身就是通知载体，再开 issue 违反「开了 PR 就不再开 issue」。
-    if: failure() && needs.prepare.outputs.review_pr == ''
+    # 但要避开 prepare 里两条自带专属通知的路径（已开审查 PR、冲突待人工处理）：
+    # 本 job 是「没有专属通知的故障」的兜底，重复响一次只会制造噪音，
+    # 前者更会违反「开了 PR 就不再开 issue」。
+    if: failure() && needs.prepare.outputs.notified == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
