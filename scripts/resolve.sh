@@ -10,7 +10,10 @@ RESOLVE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/rebase.sh
 . "$RESOLVE_DIR/rebase.sh"
 
-RESOLVE_LOG=${RESOLVE_LOG:-claude-resolution.md}
+# 日志必须落在工作树之外：resolve_conflicts 用 git add -A 收拢模型的改动，
+# 工作树内的日志会被一并提交进 patch，随发布源码永久留存并逐次增长。
+# .git/ 目录天然不在 add 的范围内。
+RESOLVE_LOG=${RESOLVE_LOG:-$(git rev-parse --git-dir 2>/dev/null || echo .)/claude-resolution.md}
 
 # build_prompt <cur_base> <new_base>
 build_prompt() {
@@ -71,6 +74,8 @@ gate_test() {
 # newly_touched <new_base> <prev_target> <cur_base>
 # 相对上一版 patch 新触及的文件。仅作报告，不作闸门 —— 硬性限制文件集会误杀
 # 「上游 API 变更导致 patch 必须适配新文件」这类合法解法。
+# 调用方（review-pr.sh 的 pr_body）保证 prev_target 非空；该基点尚无上一版时
+# 它根本不会调用本函数。
 newly_touched() {
   local new_base=$1 prev_target=$2 cur_base=$3
   comm -13 \

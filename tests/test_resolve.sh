@@ -16,12 +16,14 @@ start_conflict() {   # start_conflict <dir> —— 制造并停在冲突现场
 
 # claude 解决成功 → 退出 0，rebase 收尾，无标记残留
 d=$(mktemp -d); start_conflict "$d"
-CLAUDE_STUB_MODE=resolve
 assert_ok "解决成功" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "解决后落在新基点上"
 assert_eq "$(sed -n 2p "$d/app.go")" resolved "解决结果写入文件"
+# git add -A 会收拢工作树里的一切；诊断日志绝不能混进 patch 提交
+assert_eq "$(git -C "$d" show --pretty= --name-only HEAD | grep -c 'claude-resolution' || true)" \
+          0 "诊断日志未被提交进 patch"
 rm -rf "$d"
 
 # claude 留下标记 → 闸门①拦截，退出非 0，rebase 已 abort
