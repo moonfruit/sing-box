@@ -1535,7 +1535,8 @@ jobs:
 
 - [ ] **Step 2: 加入 actionlint 检查**
 
-在 `tests/run.sh` 末尾（`exit "$rc"` 之前）插入：
+在 `tests/run.sh` 中、**汇总消息那一行之前**插入（必须在它之前：否则 actionlint
+失败时会先打印「全部通过」再报错，读日志的人会被误导）：
 
 ```bash
 if command -v actionlint >/dev/null 2>&1; then
@@ -1545,6 +1546,8 @@ else
   printf '\nactionlint 未安装，跳过（brew install actionlint）\n'
 fi
 ```
+
+即最终顺序为：逐个 shell 套件 → actionlint → `测试失败`/`全部通过` → `exit "$rc"`。
 
 - [ ] **Step 3: 运行校验**
 
