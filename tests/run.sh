@@ -8,13 +8,13 @@ for t in "$HERE"/test_*.sh; do
   # shellcheck disable=SC1090
   ( . "$t"; exit "$ASSERT_FAILED" ) || rc=1
 done
-if (( rc )); then printf '\n测试失败\n'; else printf '\n全部通过\n'; fi
-
 if command -v actionlint >/dev/null 2>&1; then
   printf '\nactionlint\n'
   actionlint || rc=1
 else
   printf '\nactionlint 未安装，跳过（brew install actionlint）\n'
 fi
+
+if (( rc )); then printf '\n测试失败\n'; else printf '\n全部通过\n'; fi
 
 exit "$rc"
