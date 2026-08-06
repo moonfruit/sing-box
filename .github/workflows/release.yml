@@ -1,0 +1,231 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: "指定 reF1nd 基点 tag，留空则自动检测"
+        required: false
+        type: string
+      force:
+        description: "目标 tag 已存在时仍重建"
+        required: false
+        type: boolean
+        default: false
+      resolve_ref:
+        description: "人工放行冲突解决分支，形如 auto/resolve-<TARGET>"
+        required: false
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  UPSTREAM_REPO: reF1nd/sing-box
+  INTEGRATION_BRANCH: moonfruit
+  GO_VERSION: "~1.25.9"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: 检测基点
+    runs-on: ubuntu-latest
+    # issue_comment 会为仓库内任意评论创建 run，这里立即短路。
+    if: >-
+      github.event_name != 'issue_comment' || (
+        github.event.issue.pull_request != null &&
+        github.event.comment.author_association == 'OWNER' &&
+        startsWith(github.event.comment.body, '/ship')
+      )
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      base:         ${{ steps.decide.outputs.base }}
+      cur_base:     ${{ steps.decide.outputs.cur_base }}
+      target:       ${{ steps.decide.outputs.target }}
+      prev_target:  ${{ steps.decide.outputs.prev_target }}
+      ship_ref:     ${{ steps.ship.outputs.ship_ref }}
+    steps:
+      - name: 取出自动化分支
+        uses: actions/checkout@v5
+        with: { ref: ci, path: ci }
+
+      - name: 取出完整仓库
+        uses: actions/checkout@v5
+        with: { fetch-depth: 0, path: src }
+
+      - name: 拉取 reF1nd 的 tag 并落地集成分支
+        working-directory: src
+        run: |
+          set -euo pipefail
+          git remote add ref1nd "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --tags --quiet ref1nd
+          # actions/checkout 只建立 origin/* 远端引用；detect.sh 要对
+          # $INTEGRATION_BRANCH 跑 git describe / rev-parse，需要本地分支存在。
+          git branch -f "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH"
+
+      - name: 解析放行评论
+        id: ship
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          case "$ref" in
+            auto/resolve-*) ;;
+            *) echo "::error::head 分支 ${ref} 不是冲突解决分支" >&2; exit 1 ;;
+          esac
+          echo "ship_ref=${ref}" >> "$GITHUB_OUTPUT"
+
+      - name: 判定
+        id: decide
+        working-directory: src
+        env:
+          GH_TOKEN:  ${{ github.token }}
+          BASE_TAG:  ${{ inputs.base_tag }}
+          FORCE:     ${{ inputs.force }}
+          SHIP_REF:  ${{ steps.ship.outputs.ship_ref }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${SHIP_REF:-}" ]]; then
+            # 放行路径：目标 tag 直接从分支名反推，无需检测上游
+            target="${SHIP_REF#auto/resolve-}"
+            . ../ci/scripts/version.sh
+            {
+              echo "should_build=true"
+              echo "base=$(base_of "$target")"
+              echo "cur_base=$(base_of "$target")"
+              echo "target=${target}"
+              echo "prev_target="
+            } >> "$GITHUB_OUTPUT"
+          else
+            bash ../ci/scripts/detect.sh
+          fi
+
+  prepare:
+    name: 准备集成分支
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.run.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: ci, path: ci }
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0, path: src }
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+
+      - name: 配置 git 身份并拉取 reF1nd tag
+        working-directory: src
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git remote add ref1nd "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --tags --quiet ref1nd
+          git checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH"
+
+      - name: 放行冲突解决分支
+        id: ship
+        if: needs.detect.outputs.ship_ref != ''
+        working-directory: src
+        run: |
+          set -euo pipefail
+          git fetch -q origin "${{ needs.detect.outputs.ship_ref }}"
+          git reset --hard FETCH_HEAD
+
+      - name: rebase 到新基点
+        id: rebase
+        if: needs.detect.outputs.ship_ref == ''
+        working-directory: src
+        continue-on-error: true
+        run: bash ../ci/scripts/rebase.sh "${{ needs.detect.outputs.base }}" "$INTEGRATION_BRANCH"
+
+      - name: 自动解决冲突
+        id: resolve
+        if: steps.rebase.outcome == 'failure'
+        working-directory: src
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          bash ../ci/scripts/resolve.sh \
+            "${{ needs.detect.outputs.cur_base }}" "${{ needs.detect.outputs.base }}"
+
+      - name: 开审查 PR 并中止本次发布
+        if: steps.rebase.outcome == 'failure' && steps.resolve.outcome == 'success'
+        working-directory: src
+        env:
+          GH_TOKEN:     ${{ github.token }}
+          BARK_URL:     ${{ secrets.BARK_URL }}
+          CUR_BASE:     ${{ needs.detect.outputs.cur_base }}
+          PREV_TARGET:  ${{ needs.detect.outputs.prev_target }}
+        run: |
+          set -euo pipefail
+          . ../ci/scripts/notify.sh
+          url=$(bash ../ci/scripts/review-pr.sh \
+                  "${{ needs.detect.outputs.base }}" "${{ needs.detect.outputs.target }}")
+          bark "冲突已自动解决，待审查" \
+               "${{ needs.detect.outputs.target }}：在 PR 内评论 /ship 放行" "$url"
+          exit 1
+
+      - name: 冲突未能自动解决
+        if: steps.rebase.outcome == 'failure' && steps.resolve.outcome == 'failure'
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: |
+          set -euo pipefail
+          . ../ci/scripts/notify.sh
+          body=$(mktemp)
+          cat > "$body" <<EOF
+          rebase \`${{ needs.detect.outputs.cur_base }}\` → \`${{ needs.detect.outputs.base }}\` 冲突，自动解决未通过。
+
+          本地接管：
+
+          \`\`\`bash
+          git fetch origin --tags && git fetch ref1nd --tags
+          git rebase --onto ${{ needs.detect.outputs.base }} ${{ needs.detect.outputs.cur_base }} moonfruit
+          git push -f origin moonfruit
+          \`\`\`
+
+          Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          open_or_comment_issue "${{ needs.detect.outputs.target }}" "$body"
+          bark "rebase 冲突待人工处理" "${{ needs.detect.outputs.target }}" \
+               "${{ github.server_url }}/${{ github.repository }}/issues"
+          exit 1
+
+      - name: 推送集成分支与 tag
+        id: run
+        working-directory: src
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: |
+          set -euo pipefail
+          . ../ci/scripts/rebase.sh
+          assert_no_markers
+          target='${{ needs.detect.outputs.target }}'
+          git push -f origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
+          git tag "$target"
+          git push origin "refs/tags/${target}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          . ../ci/scripts/notify.sh
+          bark "已打 tag ${target}" \
+               "基点 ${{ needs.detect.outputs.base }}；$(git log --oneline "${{ needs.detect.outputs.base }}..HEAD" | wc -l | tr -d ' ') 个 patch" \
+               "${{ github.server_url }}/${{ github.repository }}/releases/tag/${target}"
