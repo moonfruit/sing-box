@@ -14,7 +14,7 @@
 - 所有 shell 脚本以 `#!/usr/bin/env bash` 开头，并 `set -euo pipefail`。
 - 版本命名：`<reF1nd tag>-moonfruit[.N]`，`N` 从 1 起（首个不带数字）。基点 = 去掉尾部 `-moonfruit[.N]`。
 - 集成分支名 `moonfruit`；默认分支名 `ci`；临时分支 `auto/resolve-<TARGET>`、`base/<TARGET>`。
-- fork 内部操作一律用 `GITHUB_TOKEN`；跨仓库（moonfruit/homebrew-tap）用 secret `HOMEBREW_GITHUB_API_TOKEN`。
+- fork 内部操作一律用 `GITHUB_TOKEN`。两处例外用统一的 secret `GH_PAT`（需 `repo` + `workflow`）：`prepare` 的 checkout（要推送带上游 workflow 文件的分支），以及 tap-bump（跨仓库）。注入 tap-bump 时映射为环境变量 `HOMEBREW_GITHUB_API_TOKEN`，那是 `brew` 认得的名字。
 - 上游仓库常量 `UPSTREAM_REPO=reF1nd/sing-box`。
 - 脚本一律放在 `scripts/`，测试放在 `tests/`，用 `bash tests/run.sh` 全量运行，零外部测试框架依赖。
 - 所有脚本必须通过 `shellcheck`；所有 workflow 必须通过 `actionlint`。
@@ -1598,7 +1598,7 @@ Expected: 脚本测试全部通过，actionlint 无输出。
           # 集成分支与冲突路径的临时分支都带着上游的 .github/workflows/，
           # 而 GITHUB_TOKEN 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，
           # 且没有任何 permissions: 键能授予该能力。必须用带 workflow scope 的 PAT。
-          token: ${{ secrets.FORK_PUSH_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
       - uses: actions/setup-go@v5
         with: { go-version: "${{ env.GO_VERSION }}" }
 
@@ -1983,7 +1983,8 @@ tag this workflow just created."
       - name: bump 并打 pr-pull
         id: bump
         env:
-          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+          # brew 认这个环境变量名，值来自统一的 GH_PAT
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GH_PAT }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
           set -euo pipefail
@@ -2150,7 +2151,8 @@ Expected: 输出 `v1.14.0-beta.5-reF1nd`。
    是冲突与构建失败的主要落地渠道，关着的话那条通知路径会直接失败）
 4. Issues → Labels → 新建 `release-conflict`
 4. Settings → Secrets and variables → Actions，添加：
-   - `HOMEBREW_GITHUB_API_TOKEN`：PAT，需对 `moonfruit/homebrew-tap` 有 `repo` 权限
+   - `GH_PAT`：唯一的 GitHub PAT，classic 类型，勾选 `repo` + `workflow` 两个 scope。
+     `workflow` 是必须的：集成分支带着上游的 `.github/workflows/`，没有该 scope 就推不上去
    - `GITEE_USER` / `GITEE_TOKEN`：从 `moonfruit/sing-box-release` 的 secrets 复制
    - `BARK_URL`：形如 `https://api.day.app/<key>`
    - `CLAUDE_CODE_OAUTH_TOKEN`：本地 `claude setup-token` 生成

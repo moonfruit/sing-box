@@ -286,8 +286,7 @@ issue 正文含冲突文件、claude 的尝试结果、人工解决命令（§6.
 
 | Secret | 用途 |
 | --- | --- |
-| `HOMEBREW_GITHUB_API_TOKEN` | PAT。tap-bump 跨仓库向 moonfruit/homebrew-tap 开 PR 并打标签（`GITHUB_TOKEN` 够不到其它仓库）。取此名是为了直接作为 `brew` 认得的环境变量注入 |
-| `FORK_PUSH_TOKEN` | PAT，需 `workflow` scope。集成分支与冲突路径的临时分支都带着上游的 `.github/workflows/`，而 `GITHUB_TOKEN` 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，且没有任何 `permissions:` 键能授予该能力。仅 `prepare` job 的 checkout 用它；其余 fork 内操作一律用 `GITHUB_TOKEN` |
+| `GH_PAT` | 唯一的 GitHub PAT，需 `repo` + `workflow` 两个 scope。两处用途：<br>① `prepare` 的 checkout —— 集成分支与冲突路径的临时分支都带着上游的 `.github/workflows/`，而 `GITHUB_TOKEN` 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，且没有任何 `permissions:` 键能授予该能力；<br>② `tap-bump` —— 跨仓库向 moonfruit/homebrew-tap 开 PR 并打标签，`GITHUB_TOKEN` 够不到其它仓库。注入时映射为 `HOMEBREW_GITHUB_API_TOKEN`，那是 `brew` 认得的变量名。<br>其余 fork 内操作一律用 `GITHUB_TOKEN` |
 | `GITEE_USER` / `GITEE_TOKEN` | Gitee `binary` 分支推送（自 sing-box-release 迁移） |
 | `BARK_URL` | Bark 推送端点 |
 | `CLAUDE_CODE_OAUTH_TOKEN` | CI 内 `claude -p` 自动解冲突（`claude setup-token` 生成） |
