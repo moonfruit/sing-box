@@ -1411,7 +1411,7 @@ exact and we never carry a second copy of the sha256."
 - Consumes: Task 1–7 的全部脚本
 - Produces:
   - job `detect`，outputs：`should_build`、`base`、`cur_base`、`target`、`prev_target`、`ship_ref`
-  - job `prepare`，outputs：`sha`（`moonfruit` 的新 tip）、`status`
+  - job `prepare`，outputs：`sha`（`moonfruit` 的新 tip）
 
 - [ ] **Step 1: 写 workflow 骨架**
 
@@ -1492,18 +1492,25 @@ jobs:
           # $INTEGRATION_BRANCH 跑 git describe / rev-parse，需要本地分支存在。
           git branch -f "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH"
 
-      - name: 解析放行评论
+      - name: 解析放行目标
         id: ship
-        if: github.event_name == 'issue_comment'
+        # 两条放行路径：PR 内评论 /ship（常规），或 dispatch 时直接给出分支名（逃生口）。
+        if: github.event_name == 'issue_comment' || inputs.resolve_ref != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.issue.number }}
+          GH_TOKEN:  ${{ github.token }}
+          PR:        ${{ github.event.issue.number }}
+          INPUT_REF: ${{ inputs.resolve_ref }}
         run: |
           set -euo pipefail
-          ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          if [[ -n "${INPUT_REF:-}" ]]; then
+            ref="$INPUT_REF"
+          else
+            ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          fi
+          # 两条路径都必须过分支名校验，否则 dispatch 就成了绕过审查的后门
           case "$ref" in
             auto/resolve-*) ;;
-            *) echo "::error::head 分支 ${ref} 不是冲突解决分支" >&2; exit 1 ;;
+            *) echo "::error::${ref} 不是冲突解决分支" >&2; exit 1 ;;
           esac
           echo "ship_ref=${ref}" >> "$GITHUB_OUTPUT"
 
