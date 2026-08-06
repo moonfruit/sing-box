@@ -314,6 +314,7 @@ assert_eq "$(decide_build v1.0-reF1nd v1.0-reF1nd aaa aaa true)"  true  "force �
 ```bash
 #!/usr/bin/env bash
 # gh 的测试替身。以 GH_STUB_MODE 选择返回的夹具。
+set -euo pipefail
 case "${1:-}" in
   api)
     case "${GH_STUB_MODE:-releases}:$2" in
@@ -660,6 +661,7 @@ editing marker text, and aborting throws them away."
 ```bash
 #!/usr/bin/env bash
 # curl 的测试替身：把 stdin 与参数记到 $CURL_STUB_LOG。
+set -euo pipefail
 { printf 'ARGS %s\n' "$*"; printf 'BODY '; cat; printf '\n'; } >> "${CURL_STUB_LOG:?}"
 ```
 
@@ -785,6 +787,7 @@ to look at."
 ```bash
 #!/usr/bin/env bash
 # claude 的测试替身。CLAUDE_STUB_MODE 决定它如何「解决」冲突。
+set -euo pipefail
 case "${CLAUDE_STUB_MODE:-resolve}" in
   resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
   leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
@@ -1178,6 +1181,8 @@ release never enters the review."
 
 ```bash
 #!/usr/bin/env bash
+# brew 的测试替身：把参数记到 $BREW_STUB_LOG。
+set -euo pipefail
 printf 'BREW %s\n' "$*" >> "${BREW_STUB_LOG:?}"
 ```
 
