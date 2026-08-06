@@ -236,3 +236,114 @@ jobs:
           bark "已打 tag ${target}" \
                "基点 ${{ needs.detect.outputs.base }}；$(git log --oneline "${{ needs.detect.outputs.base }}..HEAD" | wc -l | tr -d ' ') 个 patch" \
                "${{ github.server_url }}/${{ github.repository }}/releases/tag/${target}"
+
+  build:
+    name: 构建 ${{ matrix.variant }}
+    needs: [detect, prepare]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [purego, glibc, musl]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.detect.outputs.target }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+
+      - name: 组装 build tags
+        env:
+          TARGET: ${{ needs.detect.outputs.target }}
+        run: |
+          set -xeuo pipefail
+          TAGS=$(cat release/DEFAULT_BUILD_TAGS)
+          case "${{ matrix.variant }}" in
+            purego) TAGS="${TAGS},with_purego" ;;
+            musl)   TAGS="${TAGS},with_musl" ;;
+          esac
+          {
+            echo "BUILD_TAGS=${TAGS}"
+            echo "LDFLAGS_SHARED=$(cat release/LDFLAGS)"
+            echo "VERSION=${TARGET#v}"
+          } >> "$GITHUB_ENV"
+
+      - name: 克隆 cronet-go
+        run: |
+          set -xeuo pipefail
+          CRONET_GO_VERSION=$(cat .github/CRONET_GO_VERSION)
+          git init ~/cronet-go
+          git -C ~/cronet-go remote add origin https://github.com/sagernet/cronet-go.git
+          git -C ~/cronet-go fetch --depth=1 origin "$CRONET_GO_VERSION"
+          git -C ~/cronet-go checkout FETCH_HEAD
+          git -C ~/cronet-go submodule update --init --recursive --depth=1
+
+      - name: 重建 Debian keyring
+        run: |
+          set -xeuo pipefail
+          rm -f ~/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
+          cd ~/cronet-go
+          GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
+
+      - name: 缓存 Chromium 工具链
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/cronet-go/naiveproxy/src/third_party/llvm-build/
+            ~/cronet-go/naiveproxy/src/gn/out/
+            ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
+            ~/cronet-go/naiveproxy/src/out/sysroot-build/
+          key: chromium-toolchain-arm64-${{ matrix.variant }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
+
+      - name: 下载工具链并注入环境
+        run: |
+          set -xeuo pipefail
+          cd ~/cronet-go
+          libc=()
+          [[ "${{ matrix.variant }}" == musl ]] && libc=(--libc=musl)
+          go run ./cmd/build-naive --target=linux/arm64 "${libc[@]}" download-toolchain
+          go run ./cmd/build-naive --target=linux/arm64 "${libc[@]}" env >> "$GITHUB_ENV"
+
+      - name: 构建
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -xeuo pipefail
+          if [[ "${{ matrix.variant }}" == purego ]]; then export CGO_ENABLED=0; else export CGO_ENABLED=1; fi
+          mkdir -p dist
+          go build -v -trimpath -o dist/sing-box -tags "${BUILD_TAGS}" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid=" \
+            ./cmd/sing-box
+
+      - name: 提取 libcronet.so
+        if: matrix.variant == 'purego'
+        run: |
+          set -xeuo pipefail
+          cd ~/cronet-go
+          CGO_ENABLED=0 go run -v ./cmd/build-naive extract-lib --target linux/arm64 -o "$GITHUB_WORKSPACE/dist"
+
+      - name: 打包
+        run: |
+          set -xeuo pipefail
+          DIR_NAME="sing-box-${VERSION}-linux-arm64"
+          case "${{ matrix.variant }}" in
+            glibc) DIR_NAME="${DIR_NAME}-glibc" ;;
+            musl)  DIR_NAME="${DIR_NAME}-musl" ;;
+          esac
+          cd dist
+          mkdir -p "$DIR_NAME"
+          cp ../LICENSE sing-box "$DIR_NAME"
+          if [ -f libcronet.so ]; then cp libcronet.so "$DIR_NAME"; fi
+          tar -czvf "${DIR_NAME}.tar.gz" "$DIR_NAME"
+          rm -r "$DIR_NAME" sing-box
+          rm -f libcronet.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-linux_arm64-${{ matrix.variant }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
