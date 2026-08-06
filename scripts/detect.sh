@@ -16,17 +16,17 @@ DETECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 UPSTREAM_REPO=${UPSTREAM_REPO:-reF1nd/sing-box}
 INTEGRATION_BRANCH=${INTEGRATION_BRANCH:-moonfruit}
 
-# latest_upstream_tag —— reF1nd 最新发布的 tag。
-# 以 Release 的发布顺序为准（最忠实于实际发布），无 Release 时回退 tag 列表按版本排序。
-# 回退路径用正则而非 endswith，否则会漏掉 -reF1nd.1 这类修订 tag。
+# latest_upstream_tag —— reF1nd 最新的 tag。
+#
+# 不读 Release 列表：reF1nd 只打 tag、从不发布 Release，该路径实测恒为空。
+# 留着它反而是隐患 —— 一旦上游哪天开始发 Release，检测依据会毫无征兆地改变。
+#
+# 用正则而非 endswith("-reF1nd")：后者会漏掉 -reF1nd.1 这类修订 tag。
 latest_upstream_tag() {
   local tag
-  tag=$(gh api "repos/${UPSTREAM_REPO}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null) || tag=
-  if [[ -z "$tag" || "$tag" == "null" ]]; then
-    tag=$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=100" --paginate \
-            --jq '.[].name | select(test("-reF1nd(\\.[0-9]+)?$"))' \
-          | sort -V -r | head -n1)
-  fi
+  tag=$(gh api "repos/${UPSTREAM_REPO}/tags?per_page=100" --paginate \
+          --jq '.[].name | select(test("-reF1nd(\\.[0-9]+)?$"))' \
+        | sort -V -r | head -n1)
   [[ -n "$tag" ]] || die "未能确定 ${UPSTREAM_REPO} 的最新 tag"
   printf '%s\n' "$tag"
 }
