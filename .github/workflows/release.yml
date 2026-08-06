@@ -387,7 +387,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "$TARGET" --pattern '*linux-arm64-musl.tar.gz' --dir dist
+          # 本 job 不 checkout，CWD 不是 git 仓库，gh 无法凭本地 remote 推断
+          # 目标仓库，必须显式传 --repo。
+          gh release download "$TARGET" --repo "${{ github.repository }}" \
+            --pattern '*linux-arm64-musl.tar.gz' --dir dist
       - name: 强推 binary 分支
         env:
           GITEE_USER:  ${{ secrets.GITEE_USER }}
