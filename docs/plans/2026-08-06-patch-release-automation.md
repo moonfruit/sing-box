@@ -616,12 +616,19 @@ Expected: `test_rebase.sh` 全部 ok。
 ```bash
 tmp=$(mktemp -d)
 git clone -q --no-checkout . "$tmp/sb"
-git -C "$tmp/sb" fetch -q origin 'refs/tags/*:refs/tags/*' 'refs/heads/*:refs/heads/*'
+# --update-head-ok：新克隆的 HEAD 指向 ci，普通 fetch 会拒绝更新它
+git -C "$tmp/sb" fetch -q --update-head-ok origin \
+  'refs/tags/*:refs/tags/*' 'refs/heads/*:refs/heads/*'
+# fix-mdns-timeout 的基点 8a42af329 只带上游的 v1.14.0-alpha.29 标签，没有
+# -reF1nd 后缀，current_base 按 *-reF1nd* 匹配不到它。真正形状正确的 moonfruit
+# 分支要到 Task 11 才建出来，所以这里在一次性克隆中补一个同形状的标签来复现。
+git -C "$tmp/sb" tag v1.14.0-alpha.29-reF1nd 8a42af329
 git -C "$tmp/sb" checkout -q -B moonfruit fix-mdns-timeout
 ( cd "$tmp/sb" && bash "$OLDPWD/scripts/rebase.sh" v1.14.0-beta.5-reF1nd moonfruit ); echo "rc=$?"
 ```
 
-Expected: `rc=2`（这正是 spec 中记录的 `mdns.go` 6 行冲突）。随后 `git -C "$tmp/sb" rebase --abort && rm -rf "$tmp"`。
+Expected: `rc=2`（这正是 spec 中记录的 `mdns.go` 6 行冲突），且 `.git/rebase-merge`
+仍在（冲突现场保留）。随后 `git -C "$tmp/sb" rebase --abort && rm -rf "$tmp"`。
 
 - [ ] **Step 6: 提交**
 
