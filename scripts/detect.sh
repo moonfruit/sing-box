@@ -42,7 +42,7 @@ main() {
   [[ -n "$base" ]] || base=$(latest_upstream_tag)
 
   local existing; mapfile -t existing < <(git tag --list '*-moonfruit' '*-moonfruit.*')
-  local cur_base; cur_base=$(git describe --tags --match '*-reF1nd*' --abbrev=0 "$INTEGRATION_BRANCH")
+  local cur_base; cur_base=$(git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "$INTEGRATION_BRANCH")
   local branch_sha; branch_sha=$(git rev-parse "$INTEGRATION_BRANCH")
 
   local prev; prev=$(latest_target "$base" "${existing[@]}")

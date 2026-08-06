@@ -10,8 +10,12 @@ REBASE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 # current_base <branch> —— 从 git 历史反查当前基点，而非从 tag 名推导。
 # 这使得 rebase 步骤幂等：人工已在本地 rebase 并推送时，CI 重跑会自动跳过。
+#
+# --exclude 不可省：moonfruit tag 形如 <基点>-moonfruit[.N]，本身也匹配 *-reF1nd*。
+# 少了它，第一个 moonfruit tag 出现后基点会解析成 tag 自己，rebase --onto 的区间
+# 变成空区间，patch 被静默全部丢弃 —— 而三道闸门全会放行（无标记、能编译、测试过）。
 current_base() {
-  git describe --tags --match '*-reF1nd*' --abbrev=0 "${1:-moonfruit}"
+  git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "${1:-moonfruit}"
 }
 
 # assert_no_markers —— 打 tag 前的硬性检查。已核对 reF1nd 源码树不含此类行，不会误报。

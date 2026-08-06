@@ -18,7 +18,7 @@ start_conflict() {   # start_conflict <dir> —— 制造并停在冲突现场
 d=$(mktemp -d); start_conflict "$d"
 assert_ok "解决成功" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "解决后落在新基点上"
 assert_eq "$(sed -n 2p "$d/app.go")" resolved "解决结果写入文件"
 # git add -A 会收拢工作树里的一切；诊断日志绝不能混进 patch 提交
@@ -31,7 +31,7 @@ d=$(mktemp -d); start_conflict "$d"
 assert_fail "标记残留被拦截" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=leave SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_fail "rebase 现场已清理" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
-assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --abbrev=0 moonfruit)" \
+assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.0-reF1nd "abort 后基点回到原处"
 rm -rf "$d"
 
