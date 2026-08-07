@@ -90,7 +90,7 @@ newly_touched() {
 
 # resolve_conflicts <cur_base> <new_base>
 resolve_conflicts() {
-  local cur=$1 new=$2 guard=0
+  local cur=$1 new=$2 guard=0 orig
 
   # 守卫：workflow 按 steps.rebase.outcome == 'failure' 分派到这里，但 rebase.sh
   # 也会因为非冲突原因（git describe 找不到 tag、git checkout 失败等）在 set -e
@@ -98,6 +98,13 @@ resolve_conflicts() {
   # 少了这道守卫，下面的 while 循环一轮不跑，三道闸门在一棵完全没 rebase 过的树上
   # 通过，把未变基的旧分支当成「解决成功」的结果继续往下推。
   [[ -d "$(git rev-parse --git-path rebase-merge)" ]] || die "没有进行中的 rebase，拒绝继续"
+
+  # 立刻把 ORIG_HEAD 存成字面 SHA，而不是在闸门失败时才去读这个引用。
+  # ORIG_HEAD 是全局状态，claude 在 --permission-mode auto 下执行任何一次
+  # git reset（哪怕只是想撤销自己刚刚的暂存、完全合法的操作）都会顺手把它
+  # 重写成当时的 HEAD——而循环期间 HEAD 站在新基点上，那不是我们想回退到的
+  # 提交。用一份在循环开始前就固定下来的 SHA，不管期间发生什么都不受影响。
+  orig=$(git rev-parse ORIG_HEAD)
 
   while [[ -d "$(git rev-parse --git-path rebase-merge)" ]]; do
     (( ++guard <= 50 )) || { git rebase --abort; die "冲突轮次超过 50，放弃"; }
@@ -121,9 +128,10 @@ resolve_conflicts() {
 
   if ! gate_markers || ! gate_build || ! gate_test; then
     # 闸门跑在 rebase 收尾之后，此时已不在 rebase 现场，abort 无从谈起。
-    # git rebase 在开始前会写 ORIG_HEAD，直接回到那里即可。
-    log "闸门未通过，回退到 ORIG_HEAD"
-    git reset --hard ORIG_HEAD
+    # 回退到循环开始前固定下来的字面 SHA（$orig），不再现读 ORIG_HEAD ——
+    # 那个引用可能已经被 claude 期间跑的 git reset 覆写。
+    log "闸门未通过，回退到 ${orig}"
+    git reset --hard "$orig"
     return 1
   fi
   return 0

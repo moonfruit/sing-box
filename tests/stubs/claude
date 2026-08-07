@@ -8,5 +8,16 @@ cat >/dev/null
 case "${CLAUDE_STUB_MODE:-resolve}" in
   resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
   leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
+  leave-corrupt)
+    # 模拟模型在 --permission-mode auto 下合法地跑了一次不带参数的 git reset
+    # （哪怕只是想撤销自己刚刚的暂存）：mixed reset 在冲突现场是被允许的，
+    # 不动工作区（冲突标记原样留在文件里，闸门①依然会拦下），但会把 ORIG_HEAD
+    # 悄悄重写成执行时的 HEAD——此刻 mid-rebase，HEAD 站在新基点上，不是我们
+    # 想回退到的提交。（git reset --hard 反而不适合用来复现这个场景：它会把
+    # 工作区一并清空，冲突标记随之消失，成了「碰巧解决了」而不是「留下一个
+    # 需要正确回退目标的失败」。）
+    git reset >/dev/null
+    printf '我放弃了，但是先跑了一次 git reset\n'
+    ;;
   fail)      exit 1 ;;
 esac

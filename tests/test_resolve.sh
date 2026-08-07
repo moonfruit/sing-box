@@ -51,6 +51,18 @@ assert_fail "无 rebase 进行时 resolve_conflicts 拒绝执行" bash -c \
   "cd '$d' && SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 rm -rf "$d"
 
+# Important-5：闸门失败时的回退不能依赖 ORIG_HEAD——它是全局状态，claude 在
+# auto 模式下执行任何一次 git reset 都会把它重写成 mid-rebase 时的 HEAD（新
+# 基点）。用 leave-corrupt 模式模拟这个覆写，验证回退落到的仍是 rebase 前的
+# 真实 patch 提交，而不是被覆写后指向的新基点。
+d=$(mktemp -d); start_conflict "$d"
+orig_before=$(git -C "$d" rev-parse ORIG_HEAD)
+assert_fail "ORIG_HEAD 被模型覆写后，闸门仍然拦截（标记残留）" bash -c \
+  "cd '$d' && CLAUDE_STUB_MODE=leave-corrupt SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+assert_eq "$(git -C "$d" rev-parse moonfruit)" "$orig_before" \
+  "回退到的是 rebase 前的真实 patch 提交，而不是被覆写后的 ORIG_HEAD（新基点）"
+rm -rf "$d"
+
 # Important-4：build_prompt 里「patch 原本触及的文件」必须来自 $cur..ORIG_HEAD
 # （patch 自己的提交区间），而不是冲突现场里的 $cur..HEAD —— mid-rebase 时 HEAD
 # 已经站在新基点上，那个区间是「上游改了什么」。用一个专门的夹具把两种算法的
