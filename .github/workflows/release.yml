@@ -135,10 +135,15 @@ jobs:
         with:
           fetch-depth: 0
           path: src
-          # 集成分支与冲突路径的临时分支都带着上游的 .github/workflows/，
-          # 而 GITHUB_TOKEN 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，
-          # 且没有任何 permissions: 键能授予该能力。必须用带 workflow scope 的 PAT。
-          token: ${{ secrets.GH_PAT }}
+          # 不让 actions/checkout 把凭据持久写进 src/.git/config：这个目录后面
+          # 会跑 claude -p --permission-mode auto，它的提示词里含第三方内容
+          # （reF1nd 的提交说明）。若 .git/config 里躺着一个跨仓库、长期有效
+          # 的 PAT，任何能引导它执行 git 命令的输入都能顺手把凭据带出去。
+          # 真正需要推送（集成分支/审查 PR 的临时分支都带着上游的
+          # .github/workflows/，GITHUB_TOKEN 是 App 令牌、没有 workflow scope）
+          # 的步骤，改为用 scripts/lib.sh 的 git_auth_set/git_auth_clear
+          # 现取现用、用完即清。
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with: { go-version: "${{ env.GO_VERSION }}" }
 
@@ -156,9 +161,14 @@ jobs:
         id: ship
         if: needs.detect.outputs.ship_ref != ''
         working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          . ../ci/scripts/lib.sh
+          git_auth_set "$GH_TOKEN"
           git fetch -q origin "${{ needs.detect.outputs.ship_ref }}"
+          git_auth_clear
           git reset --hard FETCH_HEAD
 
       - name: rebase 到新基点
@@ -187,13 +197,19 @@ jobs:
         working-directory: src
         env:
           GH_TOKEN:     ${{ github.token }}
+          GH_PAT:       ${{ secrets.GH_PAT }}
           BARK_URL:     ${{ secrets.BARK_URL }}
           CUR_BASE:     ${{ needs.detect.outputs.cur_base }}
         run: |
           set -euo pipefail
           . ../ci/scripts/notify.sh
+          # review-pr.sh 要推 base/*、auto/resolve-* 两条临时分支，两者都带着上游的
+          # .github/workflows/，需要 workflow scope 的 PAT。这一步在 claude 之后，
+          # 现取现用、用完即清，凭据不会在 claude 的执行窗口内出现在 .git/config 里。
+          git_auth_set "$GH_PAT"
           url=$(bash ../ci/scripts/review-pr.sh \
                   "${{ needs.detect.outputs.base }}" "${{ needs.detect.outputs.target }}")
+          git_auth_clear
           bark "冲突已自动解决，待审查" \
                "${{ needs.detect.outputs.target }}：在 PR 内评论 /ship 放行" "$url"
           echo "notified=review-pr" >> "$GITHUB_OUTPUT"
@@ -243,19 +259,25 @@ jobs:
         working-directory: src
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
+          GH_PAT:   ${{ secrets.GH_PAT }}
+          BASE:     ${{ needs.detect.outputs.base }}
+          TARGET:   ${{ needs.detect.outputs.target }}
         run: |
           set -euo pipefail
           . ../ci/scripts/rebase.sh
           assert_no_markers
-          target='${{ needs.detect.outputs.target }}'
+          # 推 workflow 文件所在的分支与 tag，需要带 workflow scope 的 PAT；
+          # 现取现用、用完即清（见 checkout 的 persist-credentials: false 注释）。
+          git_auth_set "$GH_PAT"
           git push -f origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
-          git tag "$target"
-          git push origin "refs/tags/${target}"
+          git tag "$TARGET"
+          git push origin "refs/tags/${TARGET}"
+          git_auth_clear
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           . ../ci/scripts/notify.sh
-          bark "已打 tag ${target}" \
-               "基点 ${{ needs.detect.outputs.base }}；$(git log --oneline "${{ needs.detect.outputs.base }}..HEAD" | wc -l | tr -d ' ') 个 patch" \
-               "${{ github.server_url }}/${{ github.repository }}/releases/tag/${target}"
+          bark "已打 tag ${TARGET}" \
+               "基点 ${BASE}；$(git log --oneline "${BASE}..HEAD" | wc -l | tr -d ' ') 个 patch" \
+               "${{ github.server_url }}/${{ github.repository }}/releases/tag/${TARGET}"
 
   build:
     name: 构建 ${{ matrix.variant }}
