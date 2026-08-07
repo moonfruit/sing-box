@@ -244,9 +244,13 @@ jobs:
 
           Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EOF
-          open_or_comment_issue "${{ needs.detect.outputs.target }}" "$body"
+          # bark 排在 issue 之前，且 issue 失败不拿 || 吞掉都不能中止本步：
+          # issue 未开启或标签缺失时 open_or_comment_issue 会在 set -e 下整步
+          # 死掉，顺序反过来的话 Bark 也响不了。
           bark "rebase 冲突待人工处理" "${{ needs.detect.outputs.target }}" \
                "${{ github.server_url }}/${{ github.repository }}/issues"
+          open_or_comment_issue "${{ needs.detect.outputs.target }}" "$body" \
+            || log "开 issue 失败，已忽略（Bark 已发出）"
           echo "notified=conflict" >> "$GITHUB_OUTPUT"
 
       # 同样把中止拆出来，理由与上面那条一致
@@ -523,5 +527,8 @@ jobs:
           body=$(mktemp)
           # shellcheck disable=SC2016
           printf '发布 `%s` 失败。\n\nActions run: %s\n' "$TARGET" "$RUN_URL" > "$body"
-          open_or_comment_issue "$TARGET" "$body"
+          # bark 排在 issue 之前，且 issue 失败不能中止本步 —— 理由同 prepare 里
+          # 「冲突未能自动解决」那一步。
           bark "发布失败：${TARGET}" "见 Actions run" "$RUN_URL"
+          open_or_comment_issue "$TARGET" "$body" \
+            || log "开 issue 失败，已忽略（Bark 已发出）"
