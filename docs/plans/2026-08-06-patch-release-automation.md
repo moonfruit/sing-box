@@ -1929,8 +1929,10 @@ tag this workflow just created."
           gh release create "$TARGET" --title "$TARGET" --notes-file "$notes" dist/*.tar.gz
 ```
 
-- [ ] **Step 2: 追加 gitee-push job**
+- [ ] **Step 2: 追加 tap-bump job 与成功通知**
 
+排在 tap-bump 之后：两者 `needs` 相同因而并发，但 Gitee 跨境推 28 MB 实测约 17 分钟，
+而 tap-bump 约 1 分钟；把快的、面向日常使用的那个排在前面，Actions 界面更好读。
 逻辑与 `sing-box-release` 一致；不设 `gitee_force_push` 输入，补救靠 GitHub
 原生的 Re-run failed jobs（本 job 从 Release 下载，不依赖 build 的 artifact）：
 
@@ -1970,7 +1972,7 @@ tag this workflow just created."
           git push --progress --verbose -f gitee binary
 ```
 
-- [ ] **Step 3: 追加 tap-bump job 与成功通知**
+- [ ] **Step 3: 追加 gitee-push job**
 
 ```yaml
   tap-bump:

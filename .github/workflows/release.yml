@@ -399,43 +399,6 @@ jobs:
           } > "$notes"
           gh release create "$TARGET" --title "$TARGET" --notes-file "$notes" dist/*.tar.gz
 
-  gitee-push:
-    name: 推送 Gitee
-    needs: [detect, release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: 下载 musl 产物
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET:   ${{ needs.detect.outputs.target }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          # 本 job 不 checkout，CWD 不是 git 仓库，gh 无法凭本地 remote 推断
-          # 目标仓库，必须显式传 --repo。
-          gh release download "$TARGET" --repo "${{ github.repository }}" \
-            --pattern '*linux-arm64-musl.tar.gz' --dir dist
-      - name: 强推 binary 分支
-        env:
-          GITEE_USER:  ${{ secrets.GITEE_USER }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TARGET:      ${{ needs.detect.outputs.target }}
-        run: |
-          set -euo pipefail
-          test -n "$GITEE_USER"  || { echo "::error::GITEE_USER 缺失" >&2; exit 1; }
-          test -n "$GITEE_TOKEN" || { echo "::error::GITEE_TOKEN 缺失" >&2; exit 1; }
-          work=$(mktemp -d)
-          cp dist/sing-box-*-linux-arm64-musl.tar.gz "$work/"
-          printf '%s\n' "${TARGET#v}" > "$work/version.txt"
-          cd "$work"
-          git init -q -b binary
-          git config user.name  'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          git commit -q -m "sing-box ${TARGET} linux-arm64-musl"
-          git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/moonfruit/private.git"
-          git push --progress --verbose -f gitee binary
-
   tap-bump:
     name: 更新 Homebrew tap
     needs: [detect, release]
@@ -474,6 +437,43 @@ jobs:
           set -euo pipefail
           . scripts/notify.sh
           bark "${TARGET} 发布完成" "tap PR 已开并打上 pr-pull" "${{ steps.bump.outputs.tap_pr }}"
+
+  gitee-push:
+    name: 推送 Gitee
+    needs: [detect, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载 musl 产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # 本 job 不 checkout，CWD 不是 git 仓库，gh 无法凭本地 remote 推断
+          # 目标仓库，必须显式传 --repo。
+          gh release download "$TARGET" --repo "${{ github.repository }}" \
+            --pattern '*linux-arm64-musl.tar.gz' --dir dist
+      - name: 强推 binary 分支
+        env:
+          GITEE_USER:  ${{ secrets.GITEE_USER }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TARGET:      ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_USER"  || { echo "::error::GITEE_USER 缺失" >&2; exit 1; }
+          test -n "$GITEE_TOKEN" || { echo "::error::GITEE_TOKEN 缺失" >&2; exit 1; }
+          work=$(mktemp -d)
+          cp dist/sing-box-*-linux-arm64-musl.tar.gz "$work/"
+          printf '%s\n' "${TARGET#v}" > "$work/version.txt"
+          cd "$work"
+          git init -q -b binary
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -q -m "sing-box ${TARGET} linux-arm64-musl"
+          git remote add gitee "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/moonfruit/private.git"
+          git push --progress --verbose -f gitee binary
 
   notify-failure:
     name: 失败通知
