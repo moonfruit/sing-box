@@ -190,6 +190,9 @@ jobs:
         if: steps.rebase.outcome == 'failure'
         working-directory: src
         continue-on-error: true
+        # 没有这道上限，claude 卡死会占满默认的 6 小时，且 concurrency: group: release
+        # 会堵住后续所有 run（包括次日的 cron）。
+        timeout-minutes: 60
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CUR_BASE: ${{ needs.detect.outputs.cur_base }}
