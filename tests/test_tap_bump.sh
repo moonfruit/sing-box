@@ -25,6 +25,8 @@ assert_contains "$logged" "bump-formula-pr"                             "调用 
 assert_contains "$logged" "--version=1.14.0-beta.5-reF1nd-moonfruit"    "版本号去掉了前导 v"
 assert_contains "$logged" "moonfruit/tap/sing-box-ref1nd"               "目标 formula 正确"
 assert_contains "$logged" "--no-browse"                                 "不打开浏览器"
+# fine-grained token 无权创建 fork，brew 一旦退回 fork 路径就会直接失败
+assert_contains "$logged" "--no-fork"                                   "禁用 fork，直推 tap"
 
 # 打标签这一步是 tap 构建 bottle 的触发器。这里对 pr edit 那一行做整行精确匹配，
 # 而不是在整块日志上做子串匹配：子串匹配挡不住把标签写成 pr-pulled，也挡不住

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # 更新 moonfruit/homebrew-tap 的 sing-box-ref1nd。
+# --no-fork 不可省：brew 判断自己没有直推权限时会退回去 fork 仓库，而发布用的
+# fine-grained token 只授权了本 fork 与 tap 两个仓库，创建 fork 需要更宽的账号级
+# 权限，于是报 "Unable to fork: Resource not accessible"。我们对 tap 有写权限，
+# 本来就该直推。
+#
 # 只传 --version 就够：brew 用新版本串替换 formula 中 url 里的旧版本串，
 # 再自行下载计算 sha256。前提是 url 内含完整版本串，本方案的
 # .../tags/v${version}.tar.gz 满足。
@@ -46,7 +51,7 @@ tap_bump() {
   # 几秒内搜不到；而且搜索按标点分词，这个版本串标点极多，in:title 未必字面匹配。
   # 经 tee 边流边存：直接 out=$(...) 的话，brew 一失败 set -e 就在赋值处退出，
   # 后面的 printf 永远执行不到，它的诊断信息随之石沉大海（这正好坑过一次）。
-  out=$(brew bump-formula-pr --version="$version" --no-audit --no-browse "$TAP_FORMULA" 2>&1 | tee /dev/stderr)
+  out=$(brew bump-formula-pr --version="$version" --no-audit --no-browse --no-fork "$TAP_FORMULA" 2>&1 | tee /dev/stderr)
 
   num=$(printf '%s\n' "$out" | sed -n 's|.*/pull/\([0-9][0-9]*\).*|\1|p' | tail -n1)
 
