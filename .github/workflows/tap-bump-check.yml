@@ -23,6 +23,14 @@ jobs:
     env:
       HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:
+      # 必须排在 checkout 之前：容器以 linuxbrew 用户运行，写不了 runner 的
+      # _temp 目录，checkout 会直接 EACCES。这个 action 负责把容器内的用户与
+      # 权限理顺，tap 自己的 test-bot 也是这么起手的。
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/checkout@v5
         with: { ref: ci }
 
