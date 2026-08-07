@@ -51,6 +51,17 @@ assert_fail "无 rebase 进行时 resolve_conflicts 拒绝执行" bash -c \
   "cd '$d' && SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 rm -rf "$d"
 
+# Important-7：git add -A 会把模型顺手留下的未跟踪文件一并收拢进 patch 提交，
+# 三道闸门都不检查文件清单。add -A 前必须先把 git status 快照记进 RESOLVE_LOG，
+# 让审查者（review-pr.sh 会把整份日志贴进 PR 正文）事后能看出多带了什么。
+d=$(mktemp -d); start_conflict "$d"
+log=$(mktemp)
+assert_ok "解决成功（模型顺手留下未跟踪草稿）" bash -c \
+  "cd '$d' && CLAUDE_STUB_MODE=resolve-with-draft SKIP_GO_GATES=1 RESOLVE_LOG='$log' bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+assert_contains "$(cat "$log")" "scratch-notes.md" \
+  "add -A 前的 git status 快照记下了模型顺手留下的未跟踪文件"
+rm -rf "$d" "$log"
+
 # Important-5：闸门失败时的回退不能依赖 ORIG_HEAD——它是全局状态，claude 在
 # auto 模式下执行任何一次 git reset 都会把它重写成 mid-rebase 时的 HEAD（新
 # 基点）。用 leave-corrupt 模式模拟这个覆写，验证回退落到的仍是 rebase 前的

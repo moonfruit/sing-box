@@ -7,6 +7,13 @@ set -euo pipefail
 cat >/dev/null
 case "${CLAUDE_STUB_MODE:-resolve}" in
   resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
+  resolve-with-draft)
+    # 除了正常解决冲突，顺手留一份未跟踪的草稿文件——模拟模型探索过程中
+    # 落下的东西，git add -A 会把它一并收拢进 patch 提交。
+    printf 'line1\nresolved\n' > app.go
+    printf 'debug notes\n' > scratch-notes.md
+    printf '已合并两侧改动（顺手留了份笔记）\n'
+    ;;
   leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
   leave-corrupt)
     # 模拟模型在 --permission-mode auto 下合法地跑了一次不带参数的 git reset

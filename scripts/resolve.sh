@@ -118,6 +118,15 @@ resolve_conflicts() {
       return 1
     fi
 
+    # git add -A 前把工作树状态记进日志：它会把模型留下的任何未跟踪文件一并
+    # 收拢进 patch 提交，三道闸门都不检查文件清单，这份快照是唯一能让审查者
+    # （见 review-pr.sh 的 pr_body，日志会整份贴进 PR 正文）事后看出「这次
+    # 解决顺手带了什么」的地方。
+    {
+      printf '\n### git status（git add -A 前）\n\n```\n'
+      git status --porcelain -uall
+      printf '```\n'
+    } >> "$RESOLVE_LOG"
     git add -A
     if ! GIT_EDITOR=true git rebase --continue; then
       git rebase --abort
