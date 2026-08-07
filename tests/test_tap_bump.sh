@@ -15,6 +15,9 @@ GH_STUB_LOG=$(mktemp); export GH_STUB_LOG
 
 # 缩短轮询间隔，测试不必真等
 export TAP_CHECK_INTERVAL=0 TAP_CHECK_TRIES=3
+# 指向临时文件而不是清掉它：emit 在 CI 里写 $GITHUB_OUTPUT、在本地打 stdout，
+# 断言若只看 stdout，就只在没有该变量的机器上成立。这里验生产实际走的那条路。
+GITHUB_OUTPUT=$(mktemp); export GITHUB_OUTPUT
 out=$(tap_bump v1.14.0-beta.5-reF1nd-moonfruit)
 logged=$(cat "$BREW_STUB_LOG")
 
@@ -29,10 +32,10 @@ assert_contains "$logged" "--no-browse"                                 "不打�
 assert_eq "$(grep '^GH pr edit' "$GH_STUB_LOG")" \
           "GH pr edit 42 --repo moonfruit/homebrew-tap --add-label pr-pull" \
           "打标签的调用与预期逐字相符"
-assert_contains "$out" "tap_pr=https://github.com/moonfruit/homebrew-tap/pull/42" \
-                                                             "输出 tap PR 链接"
+assert_contains "$(cat "$GITHUB_OUTPUT")" \
+          "tap_pr=https://github.com/moonfruit/homebrew-tap/pull/42" "输出 tap PR 链接"
 
-rm -f "$BREW_STUB_LOG" "$GH_STUB_LOG"
+rm -f "$BREW_STUB_LOG" "$GH_STUB_LOG" "$GITHUB_OUTPUT"
 
 # CI 未通过时绝不能打标签 —— 抢跑会让 pr-pull 拿不到 bottle
 : > "$GH_STUB_LOG"

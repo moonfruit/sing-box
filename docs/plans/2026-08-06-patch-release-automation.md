@@ -1305,6 +1305,9 @@ BREW_STUB_LOG=$(mktemp); export BREW_STUB_LOG
 # 测试自带凭据：tap_bump 用 ${HOMEBREW_GITHUB_API_TOKEN:?} 断言其存在，
 # 不自带就只在开发机恰好导出了真实 PAT 时才通过。值无所谓，brew 与 gh 都是 stub。
 export HOMEBREW_GITHUB_API_TOKEN=stub-token
+# GITHUB_OUTPUT 指向临时文件而不是清掉它：emit 在 CI 里写该文件、在本地打 stdout，
+# 断言若只看 stdout，就只在没有该变量的机器上成立（新增的 Tests workflow 抓到过这点）。
+GITHUB_OUTPUT=$(mktemp); export GITHUB_OUTPUT
 GH_STUB_LOG=$(mktemp); export GH_STUB_LOG
 
 out=$(tap_bump v1.14.0-beta.5-reF1nd-moonfruit)
