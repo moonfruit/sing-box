@@ -189,7 +189,6 @@ jobs:
           GH_TOKEN:     ${{ github.token }}
           BARK_URL:     ${{ secrets.BARK_URL }}
           CUR_BASE:     ${{ needs.detect.outputs.cur_base }}
-          PREV_TARGET:  ${{ needs.detect.outputs.prev_target }}
         run: |
           set -euo pipefail
           . ../ci/scripts/notify.sh

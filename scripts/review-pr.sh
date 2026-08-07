@@ -9,8 +9,24 @@ set -euo pipefail
 PR_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/lib.sh
 . "$PR_DIR/lib.sh"
+# shellcheck source=scripts/version.sh
+. "$PR_DIR/version.sh"
 # shellcheck source=scripts/resolve.sh
 . "$PR_DIR/resolve.sh"
+
+# resolved_prev_target <cur_base> —— 该基点下已发布的最新 moonfruit tag，range-diff 的比较基准。
+#
+# 不能用 detect.sh 传来的 prev_target：那是相对*新*基点算的（latest_target "$base" ...），
+# 而冲突只在基点变更时发生 —— 新基点上此刻必然还没有任何 moonfruit tag，这个值恒为空，
+# 导致 review PR 里的 range-diff 与「新触及文件」两段永远是空的。detect 的 prev_target
+# 仍然是对的，只是那是给 decide_build 用的，跟这里要比较的对象根本不是同一个东西。
+#
+# 正确的比较基准是旧基点（$cur_base）下的上一个发布 tag，从实际存在的 git tag 反查。
+resolved_prev_target() {
+  local cur=$1
+  local existing; mapfile -t existing < <(git tag --list '*-moonfruit' '*-moonfruit.*')
+  latest_target "$cur" "${existing[@]}"
+}
 
 # pr_body <cur_base> <new_base> <prev_target> <target> <resolution-log>
 pr_body() {
@@ -69,9 +85,10 @@ create_review_pr() {
   git push -f origin "${new}^{commit}:refs/heads/${base_branch}"
   git push -f origin "HEAD:refs/heads/${auto_branch}"
 
+  local prev; prev=$(resolved_prev_target "${CUR_BASE:?}")
   local body; body=$(mktemp)
   # RESOLVE_LOG 的默认值由 resolve.sh 在被 source 时确定（工作树之外），此处直接沿用
-  pr_body "${CUR_BASE:?}" "$new" "${PREV_TARGET:-}" "$target" "$RESOLVE_LOG" > "$body"
+  pr_body "${CUR_BASE:?}" "$new" "$prev" "$target" "$RESOLVE_LOG" > "$body"
   gh pr create --base "$base_branch" --head "$auto_branch" \
     --title "自动解决冲突：${target}" --body-file "$body"
   rm -f "$body"
