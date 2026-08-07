@@ -20,6 +20,10 @@ jobs:
     name: 更新 Homebrew tap（验证）
     runs-on: ubuntu-latest
     container: ghcr.io/homebrew/brew:main
+    defaults:
+      run:
+        # 容器里 run: 的默认 shell 是 sh（dash），它不认 set -o pipefail。
+        shell: bash
     env:
       HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:

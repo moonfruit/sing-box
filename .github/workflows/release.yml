@@ -471,6 +471,10 @@ jobs:
     # 自带 linuxbrew，但要靠猜死路径把它塞进 PATH、要手工补 git 身份，且环境随
     # runner 镜像漂移 —— 这一类问题已经连着咬了三次。容器把它们一次性消掉。
     container: ghcr.io/homebrew/brew:main
+    defaults:
+      run:
+        # 容器里 run: 的默认 shell 是 sh（dash），它不认 set -o pipefail。
+        shell: bash
     env:
       HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:
