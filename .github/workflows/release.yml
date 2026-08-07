@@ -486,14 +486,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # setup-homebrew 会装一个全局的 git 认证头，actions/checkout 还会再加一个
-      # 局部的，两个 Authorization 撞在一起服务端直接 400。checkout 自带凭据，
-      # 摘掉全局那个即可。
-      - name: 摘掉全局 git 认证头
-        run: git config --global --unset-all http.https://github.com/.extraheader || true
-
-      - uses: actions/checkout@v5
-        with: { ref: ci }
+      # 不用 actions/checkout：它会再装一个局部认证头，与 setup-homebrew 的全局头
+      # 撞成 Duplicate header 400；而摘掉全局头又会让 setup-homebrew 的 post 清理
+      # 脚本以 exit 5 收场，把整个 job 拖红。这里只需要 ci 分支上的 scripts/，
+      # 仓库是公开的，浅克隆一份即可，两边都不碰。
+      - name: 取出自动化脚本
+        run: git clone --depth 1 --branch ci "https://github.com/${GITHUB_REPOSITORY}.git" ci
 
       - name: 准备 Homebrew 环境
         run: |
@@ -503,7 +501,7 @@ jobs:
           git config --global user.name  'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           # 容器里 checkout 出来的目录属主与运行用户不同，git 会拒绝操作
-          git config --global --add safe.directory "$PWD"
+          git config --global --add safe.directory "$PWD/ci"
           # 容器内没有 gh；tap-bump.sh 用它查 CI 状态并打标签
           command -v gh >/dev/null || brew install gh
 
@@ -518,14 +516,14 @@ jobs:
           set -euo pipefail
           # bump-formula-pr 只认已 tap 的 formula，runner 上必须先 tap。
           brew tap moonfruit/tap
-          bash scripts/tap-bump.sh "$TARGET"
+          bash ci/scripts/tap-bump.sh "$TARGET"
       - name: 完成通知
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
           TARGET:   ${{ needs.detect.outputs.target }}
         run: |
           set -euo pipefail
-          . scripts/notify.sh
+          . ci/scripts/notify.sh
           bark "${TARGET} 发布完成" "tap PR 已开并打上 pr-pull" "${{ steps.bump.outputs.tap_pr }}"
 
   gitee-push:
