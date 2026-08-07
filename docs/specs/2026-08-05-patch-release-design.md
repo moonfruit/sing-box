@@ -92,7 +92,8 @@ v1.14.0-beta.5-reF1nd.1  v1.14.0-beta.5-reF1nd.1-moonfruit
 | --- | --- |
 | `base_tag` | 指定 reF1nd 基点 tag，留空则自动检测 |
 | `force` | 目标 tag 已存在时仍重建 |
-| `resolve_ref` | 人工放行冲突解决分支，值为 `auto/resolve-<TARGET>`；`issue_comment` 路径则从事件载荷中取 PR 的 head ref |
+
+不设放行用的输入。放行分支 `auto/resolve-<TARGET>` 由 CI 自建、审查 PR 也由 CI 自开，人工唯一要做的就是在那个 PR 内评论 `/ship`（见 §6.3），dispatch 时无从、也无需指定它；分支名从 `issue_comment` 事件载荷里取 PR 的 head ref。
 
 不设 `gitee_force_push` 输入。Gitee 推送失败的补救由 GitHub 原生的 **Re-run failed jobs** 覆盖：该 job 从 Release 下载 musl 产物，不依赖 build job 的 artifact，可独立重跑。
 

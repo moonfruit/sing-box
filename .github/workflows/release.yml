@@ -14,10 +14,6 @@ on:
         required: false
         type: boolean
         default: false
-      resolve_ref:
-        description: "人工放行冲突解决分支，形如 auto/resolve-<TARGET>"
-        required: false
-        type: string
   issue_comment:
     types: [created]
 
@@ -78,20 +74,16 @@ jobs:
 
       - name: 解析放行目标
         id: ship
-        # 两条放行路径：PR 内评论 /ship（常规），或 dispatch 时直接给出分支名（逃生口）。
-        if: github.event_name == 'issue_comment' || inputs.resolve_ref != ''
+        # 放行只有一条路径：在审查 PR 内评论 /ship。分支 auto/resolve-<TARGET> 由
+        # review-pr.sh 自动建出，人工无需、也无从指定它。
+        if: github.event_name == 'issue_comment'
         env:
           GH_TOKEN:  ${{ github.token }}
           PR:        ${{ github.event.issue.number }}
-          INPUT_REF: ${{ inputs.resolve_ref }}
         run: |
           set -euo pipefail
-          if [[ -n "${INPUT_REF:-}" ]]; then
-            ref="$INPUT_REF"
-          else
-            ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
-          fi
-          # 两条路径都必须过分支名校验，否则 dispatch 就成了绕过审查的后门
+          ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          # 校验分支名：否则在任意一个 PR 下评论 /ship 都能把那条 head 发出去
           case "$ref" in
             auto/resolve-*) ;;
             *) echo "::error::${ref} 不是冲突解决分支" >&2; exit 1 ;;
