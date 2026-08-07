@@ -86,6 +86,14 @@ newly_touched() {
 # resolve_conflicts <cur_base> <new_base>
 resolve_conflicts() {
   local cur=$1 new=$2 guard=0
+
+  # 守卫：workflow 按 steps.rebase.outcome == 'failure' 分派到这里，但 rebase.sh
+  # 也会因为非冲突原因（git describe 找不到 tag、git checkout 失败等）在 set -e
+  # 下以 exit 1 收场，此时 outcome 同样是 failure，而 rebase-merge 根本不存在。
+  # 少了这道守卫，下面的 while 循环一轮不跑，三道闸门在一棵完全没 rebase 过的树上
+  # 通过，把未变基的旧分支当成「解决成功」的结果继续往下推。
+  [[ -d "$(git rev-parse --git-path rebase-merge)" ]] || die "没有进行中的 rebase，拒绝继续"
+
   while [[ -d "$(git rev-parse --git-path rebase-merge)" ]]; do
     (( ++guard <= 50 )) || { git rebase --abort; die "冲突轮次超过 50，放弃"; }
 

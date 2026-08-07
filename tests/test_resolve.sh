@@ -41,3 +41,12 @@ assert_fail "claude 失败被处理" bash -c \
   "cd '$d' && CLAUDE_STUB_MODE=fail SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_fail "rebase 现场已清理" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
 rm -rf "$d"
+
+# C2：没有进行中的 rebase 时调用 resolve_conflicts 必须拒绝，而不是把一棵完全
+# 没变基过的树当成「解决成功」的结果往下推。workflow 按 steps.rebase.outcome
+# == 'failure' 分派到这里，但 rebase.sh 也会因非冲突原因（找不到 tag、checkout
+# 失败等）同样以 failure 收场——那种情况下根本没有 rebase-merge 目录。
+d=$(mktemp -d); make_fixture "$d" clean   # 干净仓库，从未进入过 rebase
+assert_fail "无 rebase 进行时 resolve_conflicts 拒绝执行" bash -c \
+  "cd '$d' && SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+rm -rf "$d"
