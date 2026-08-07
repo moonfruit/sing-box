@@ -283,6 +283,27 @@ jobs:
                "基点 ${BASE}；$(git log --oneline "${BASE}..HEAD" | wc -l | tr -d ' ') 个 patch" \
                "${{ github.server_url }}/${{ github.repository }}/releases/tag/${TARGET}"
 
+      # spec §6.3 承诺「审查通过后删除」auto/resolve-*、base/* 分支并关闭 PR，
+      # 但发布流程从未兑现过这个承诺。只在放行路径（ship_ref 非空）下做，
+      # 因为只有这条路径才可能真的有临时分支和 PR 存在。
+      - name: 清理临时分支并关闭审查 PR
+        if: needs.detect.outputs.ship_ref != ''
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PAT:   ${{ secrets.GH_PAT }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+        run: |
+          set -euo pipefail
+          . ../ci/scripts/lib.sh
+          git_auth_set "$GH_PAT"
+          git push origin --delete "auto/resolve-${TARGET}" || true
+          git push origin --delete "base/${TARGET}" || true
+          git_auth_clear
+          num=$(gh pr list --state open --head "auto/resolve-${TARGET}" \
+                  --json number --jq '.[0].number // empty')
+          [[ -z "$num" ]] || gh pr close "$num" --comment "已发布 ${TARGET}，关闭本 PR。"
+
   build:
     name: 构建 ${{ matrix.variant }}
     needs: [detect, prepare]
