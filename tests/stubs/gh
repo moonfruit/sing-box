@@ -35,7 +35,22 @@ JSON
     ;;
   pr)
     printf 'GH %s\n' "$*" >> "${GH_STUB_LOG:?}"
-    if [[ "${2:-}" == list ]]; then printf '42\n'; fi
+    case "${2:-}" in
+      list)   printf '42\n' ;;
+      # tap 的 test-bot 结果；GH_STUB_CHECKS 可改成 fail 以验证判别力。
+      # 与 api 分支同理：真跑调用方的 --jq，否则被测的过滤条件形同虚设。
+      checks)
+        filter=
+        args=("$@")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+          if [[ "${args[i]}" == --jq ]]; then filter=${args[i+1]:?"stub: --jq 缺少参数"}; break; fi
+        done
+        [[ -n "$filter" ]] || filter='.'
+        jq -r "$filter" <<JSON
+[{"name":"test-bot (macos-26)","bucket":"${GH_STUB_CHECKS:-pass}"}]
+JSON
+        ;;
+    esac
     ;;
   *) exit 1 ;;
 esac

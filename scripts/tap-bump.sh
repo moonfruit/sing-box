@@ -12,6 +12,31 @@ TAP_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 TAP_FORMULA=${TAP_FORMULA:-moonfruit/tap/sing-box-ref1nd}
 TAP_REPO=${TAP_REPO:-moonfruit/homebrew-tap}
 
+TAP_CHECK_TRIES=${TAP_CHECK_TRIES:-80}     # 每次 30 秒，约 40 分钟上限
+TAP_CHECK_INTERVAL=${TAP_CHECK_INTERVAL:-30}
+
+# wait_for_checks <pr-number> —— 等 tap 的 test-bot 全部通过。
+# 只看 test-bot：pr-pull 自己也是一项检查，等它就成了死锁。
+wait_for_checks() {
+  local num=$1 i state
+  for ((i = 0; i < TAP_CHECK_TRIES; i++)); do
+    state=$(GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN:?}" \
+            gh pr checks "$num" --repo "$TAP_REPO" --json bucket,name \
+              --jq '[.[] | select(.name | startswith("test-bot")) | .bucket]
+                    | if length == 0 then "pending"
+                      elif any(. == "fail" or . == "cancel") then "fail"
+                      elif all(. == "pass" or . == "skipping") then "pass"
+                      else "pending" end' 2>/dev/null) || state=pending
+    case "$state" in
+      pass) log "tap CI 已通过"; return 0 ;;
+      fail) log "tap CI 失败"; return 1 ;;
+    esac
+    sleep "$TAP_CHECK_INTERVAL"
+  done
+  log "等待 tap CI 超时"
+  return 1
+}
+
 # tap_bump <target-tag>
 tap_bump() {
   local target=$1 version=${1#v} out num
@@ -37,6 +62,11 @@ tap_bump() {
             done)
   fi
   [[ -n "$num" ]] || die "未能确定 ${TAP_REPO} 中版本 ${version} 对应的 PR"
+
+  # 必须等 test-bot 构建完 bottle 再打标签：pr-pull 由打标签触发，而它要下载
+  # test-bot 的产物，抢跑会直接报 "The newest workflow run is still in progress"。
+  # 人工流程里也是看到 CI 通过才打标签的。
+  wait_for_checks "$num" || die "tap CI 未通过，未打标签；PR: https://github.com/${TAP_REPO}/pull/${num}"
 
   GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN}" \
     gh pr edit "$num" --repo "$TAP_REPO" --add-label pr-pull

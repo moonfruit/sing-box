@@ -1394,6 +1394,11 @@ tap_bump() {
   fi
   [[ -n "$num" ]] || die "未能确定 ${TAP_REPO} 中版本 ${version} 对应的 PR"
 
+  # 必须等 test-bot 构建完 bottle 再打标签：pr-pull 由打标签触发，而它要下载
+  # test-bot 的产物，抢跑会直接报 "The newest workflow run is still in progress"。
+  # 人工流程里也是看到 CI 通过才打标签的。首次真跑即因此失败。
+  wait_for_checks "$num" || die "tap CI 未通过，未打标签；PR: https://github.com/${TAP_REPO}/pull/${num}"
+
   GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN}" \
     gh pr edit "$num" --repo "$TAP_REPO" --add-label pr-pull
 

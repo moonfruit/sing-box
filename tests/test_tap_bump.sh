@@ -13,6 +13,8 @@ BREW_STUB_LOG=$(mktemp); export BREW_STUB_LOG
 export HOMEBREW_GITHUB_API_TOKEN=stub-token
 GH_STUB_LOG=$(mktemp); export GH_STUB_LOG
 
+# 缩短轮询间隔，测试不必真等
+export TAP_CHECK_INTERVAL=0 TAP_CHECK_TRIES=3
 out=$(tap_bump v1.14.0-beta.5-reF1nd-moonfruit)
 logged=$(cat "$BREW_STUB_LOG")
 
@@ -31,3 +33,11 @@ assert_contains "$out" "tap_pr=https://github.com/moonfruit/homebrew-tap/pull/42
                                                              "输出 tap PR 链接"
 
 rm -f "$BREW_STUB_LOG" "$GH_STUB_LOG"
+
+# CI 未通过时绝不能打标签 —— 抢跑会让 pr-pull 拿不到 bottle
+: > "$GH_STUB_LOG"
+export GH_STUB_CHECKS=fail
+assert_fail "tap CI 失败时不打标签" \
+  bash -c ". '$HERE/../scripts/tap-bump.sh' && TAP_CHECK_INTERVAL=0 TAP_CHECK_TRIES=2 tap_bump v1.0-reF1nd-moonfruit"
+assert_eq "$(grep -c 'pr edit' "$GH_STUB_LOG" || true)" 0 "失败路径下未发出打标签调用"
+unset GH_STUB_CHECKS
