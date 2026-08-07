@@ -32,6 +32,7 @@ resolved_prev_target() {
 pr_body() {
   local cur=$1 new=$2 prev=$3 target=$4 logfile=$5
   local rangediff newfiles
+  [[ -s "$logfile" ]] || die "解决日志为空，拒绝生成审查 PR 正文：${logfile}"
   if [[ -n "$prev" ]]; then
     rangediff=$(git range-diff "$cur..$prev" "$new..HEAD" 2>&1 || true)
     newfiles=$(newly_touched "$new" "$prev" "$cur" || true)

@@ -56,7 +56,8 @@ main() {
   local branch_sha; branch_sha=$(git rev-parse "$INTEGRATION_BRANCH")
 
   local prev; prev=$(latest_target "$base" "${existing[@]}")
-  local prev_sha=; [[ -n "$prev" ]] && prev_sha=$(git rev-parse "${prev}^{commit}")
+  local prev_sha=
+  if [[ -n "$prev" ]]; then prev_sha=$(git rev-parse "${prev}^{commit}"); fi
 
   local should; should=$(decide_build "$base" "$cur_base" "$branch_sha" "$prev_sha" "${FORCE:-false}")
   local target; target=$(next_target "$base" "${existing[@]}")

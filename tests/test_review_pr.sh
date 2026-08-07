@@ -39,4 +39,13 @@ assert_contains "$body" "git rebase --onto"      "正文含人工接管命令"
 assert_contains "$body" "extra" "range-diff 含真实的行级差异，证明比较基准非空"
 assert_eq "$(printf '%s' "$body" | grep -c '该基点下没有上一版')" 0 \
   "range-diff 不是「无从比较」的占位文案"
+
+# Minor：解决日志为空时拒绝生成 PR 正文，而不是悄悄贴出一段空白的
+# 「claude 的解决说明」——空日志本身就说明上一步没有正常留痕，该早失败。
+empty_log=$(mktemp)
+assert_fail "解决日志为空时 pr_body 拒绝生成正文" bash -c \
+  "cd '$d' && . '$HERE/../scripts/review-pr.sh' \
+   && pr_body v1.0-reF1nd v1.1-reF1nd '$prev' v1.1-reF1nd-moonfruit '$empty_log'"
+rm -f "$empty_log"
+
 rm -rf "$d" "$log_file"
