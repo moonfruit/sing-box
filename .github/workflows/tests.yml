@@ -1,0 +1,26 @@
+name: Tests
+
+# 让 scripts/、tests/ 与 release.yml 本身有一道最基础的守门：push 到 ci 分支时
+# 跑一遍 tests/run.sh（含 actionlint，用来校验 release.yml 本身）。
+on:
+  push:
+    branches: [ci]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests/run.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -fsS https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: bash tests/run.sh
+        run: bash tests/run.sh
