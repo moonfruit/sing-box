@@ -28,6 +28,12 @@ latest_upstream_tag() {
           --jq '.[].name | select(test("-reF1nd(\\.[0-9]+)?$"))' \
         | sort -V -r | head -n1)
   [[ -n "$tag" ]] || die "未能确定 ${UPSTREAM_REPO} 的最新 tag"
+  # 白名单校验：reF1nd 的 tag 名是第三方可控输入，git 允许 tag 名中含单引号、
+  # 反引号、$( 等 shell 特殊字符（已实测验证）。这个值后续会被 release.yml
+  # 的多处 shell 文本使用——哪怕改走 env: 传递，也不该让一个格式古怪的 tag
+  # 名字带着这些字符流进发布流水线的其它角落。只放行版本号常见字符。
+  [[ "$tag" =~ ^v[0-9][A-Za-z0-9._-]*-reF1nd(\.[0-9]+)?$ ]] \
+    || die "reF1nd tag 名不合法，拒绝继续：${tag}"
   printf '%s\n' "$tag"
 }
 

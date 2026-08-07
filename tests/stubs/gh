@@ -16,7 +16,15 @@ case "${1:-}" in
           shift
         done
         [[ -n "$filter" ]] || filter='.[].name'
-        jq -r "$filter" <<'JSON'
+        if [[ "${GH_STUB_MALICIOUS_TAG:-}" == 1 ]]; then
+          # Important-9：reF1nd 是第三方，tag 名里能合法塞进单引号——git 允许，
+          # 已实测验证。这个名字仍以 -reF1nd 结尾，能通过 gh 自己那道
+          # -reF1nd(\.[0-9]+)?$ 过滤，考验的是 latest_upstream_tag 自己的白名单。
+          jq -r "$filter" <<'JSON'
+[{"name": "v1.0'-reF1nd"}]
+JSON
+        else
+          jq -r "$filter" <<'JSON'
 [
   {"name": "v1.14.0-alpha.43-reF1nd"},
   {"name": "v1.14.0-beta.5-reF1nd"},
@@ -24,6 +32,7 @@ case "${1:-}" in
   {"name": "v1.14.0-beta.9-reF1nd-moonfruit"}
 ]
 JSON
+        fi
         ;;
       *) exit 1 ;;
     esac ;;

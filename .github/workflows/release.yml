@@ -167,11 +167,12 @@ jobs:
         working-directory: src
         env:
           GH_TOKEN: ${{ github.token }}
+          SHIP_REF: ${{ needs.detect.outputs.ship_ref }}
         run: |
           set -euo pipefail
           . ../ci/scripts/lib.sh
           git_auth_set "$GH_TOKEN"
-          git fetch -q origin "${{ needs.detect.outputs.ship_ref }}"
+          git fetch -q origin "$SHIP_REF"
           git_auth_clear
           git reset --hard FETCH_HEAD
 
@@ -180,7 +181,9 @@ jobs:
         if: needs.detect.outputs.ship_ref == ''
         working-directory: src
         continue-on-error: true
-        run: bash ../ci/scripts/rebase.sh "${{ needs.detect.outputs.base }}" "$INTEGRATION_BRANCH"
+        env:
+          BASE: ${{ needs.detect.outputs.base }}
+        run: bash ../ci/scripts/rebase.sh "$BASE" "$INTEGRATION_BRANCH"
 
       - name: 自动解决冲突
         id: resolve
@@ -208,6 +211,8 @@ jobs:
           GH_PAT:       ${{ secrets.GH_PAT }}
           BARK_URL:     ${{ secrets.BARK_URL }}
           CUR_BASE:     ${{ needs.detect.outputs.cur_base }}
+          BASE:         ${{ needs.detect.outputs.base }}
+          TARGET:       ${{ needs.detect.outputs.target }}
         run: |
           set -euo pipefail
           . ../ci/scripts/notify.sh
@@ -215,11 +220,9 @@ jobs:
           # .github/workflows/，需要 workflow scope 的 PAT。这一步在 claude 之后，
           # 现取现用、用完即清，凭据不会在 claude 的执行窗口内出现在 .git/config 里。
           git_auth_set "$GH_PAT"
-          url=$(bash ../ci/scripts/review-pr.sh \
-                  "${{ needs.detect.outputs.base }}" "${{ needs.detect.outputs.target }}")
+          url=$(bash ../ci/scripts/review-pr.sh "$BASE" "$TARGET")
           git_auth_clear
-          bark "冲突已自动解决，待审查" \
-               "${{ needs.detect.outputs.target }}：在 PR 内评论 /ship 放行" "$url"
+          bark "冲突已自动解决，待审查" "${TARGET}：在 PR 内评论 /ship 放行" "$url"
           echo "notified=review-pr" >> "$GITHUB_OUTPUT"
 
       # 中止单独成步：上一步必须成功结束，notified 这个 output 才会被记录下来，
@@ -235,29 +238,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BARK_URL: ${{ secrets.BARK_URL }}
+          CUR_BASE: ${{ needs.detect.outputs.cur_base }}
+          BASE:     ${{ needs.detect.outputs.base }}
+          TARGET:   ${{ needs.detect.outputs.target }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUES_URL: ${{ github.server_url }}/${{ github.repository }}/issues
         run: |
           set -euo pipefail
           . ../ci/scripts/notify.sh
           body=$(mktemp)
           cat > "$body" <<EOF
-          rebase \`${{ needs.detect.outputs.cur_base }}\` → \`${{ needs.detect.outputs.base }}\` 冲突，自动解决未通过。
+          rebase \`${CUR_BASE}\` → \`${BASE}\` 冲突，自动解决未通过。
 
           本地接管：
 
           \`\`\`bash
           git fetch origin --tags && git fetch ref1nd --tags
-          git rebase --onto ${{ needs.detect.outputs.base }} ${{ needs.detect.outputs.cur_base }} moonfruit
+          git rebase --onto ${BASE} ${CUR_BASE} moonfruit
           git push -f origin moonfruit
           \`\`\`
 
-          Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Actions run: ${RUN_URL}
           EOF
           # bark 排在 issue 之前，且 issue 失败不拿 || 吞掉都不能中止本步：
           # issue 未开启或标签缺失时 open_or_comment_issue 会在 set -e 下整步
           # 死掉，顺序反过来的话 Bark 也响不了。
-          bark "rebase 冲突待人工处理" "${{ needs.detect.outputs.target }}" \
-               "${{ github.server_url }}/${{ github.repository }}/issues"
-          open_or_comment_issue "${{ needs.detect.outputs.target }}" "$body" \
+          bark "rebase 冲突待人工处理" "$TARGET" "$ISSUES_URL"
+          open_or_comment_issue "$TARGET" "$body" \
             || log "开 issue 失败，已忽略（Bark 已发出）"
           echo "notified=conflict" >> "$GITHUB_OUTPUT"
 
@@ -478,11 +485,12 @@ jobs:
           # brew 认这个环境变量名，值来自统一的 GH_PAT
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GH_PAT }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
+          TARGET: ${{ needs.detect.outputs.target }}
         run: |
           set -euo pipefail
           # bump-formula-pr 只认已 tap 的 formula，runner 上必须先 tap。
           brew tap moonfruit/tap
-          bash scripts/tap-bump.sh "${{ needs.detect.outputs.target }}"
+          bash scripts/tap-bump.sh "$TARGET"
       - name: 完成通知
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
