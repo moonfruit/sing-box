@@ -1,0 +1,46 @@
+name: Tap bump check
+
+# 一次性的验证台：只跑 tap-bump 那一段，针对一个已发布的 tag。
+# 用途是验证 Homebrew 容器方案，避免为此重跑一次 30 分钟的完整构建。
+# 验证通过后本文件即可删除。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "已发布的 moonfruit tag，例如 v1.14.0-beta.8-reF1nd-moonfruit.4"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tap-bump:
+    name: 更新 Homebrew tap（验证）
+    runs-on: ubuntu-latest
+    container: ghcr.io/homebrew/brew:main
+    env:
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: ci }
+
+      - name: 准备 Homebrew 环境
+        run: |
+          set -euo pipefail
+          git config --global user.name  'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config --global --add safe.directory "$PWD"
+          command -v gh >/dev/null || brew install gh
+
+      - name: bump 并打 pr-pull
+        id: bump
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GH_PAT }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          brew tap moonfruit/tap
+          bash scripts/tap-bump.sh "$TARGET"
