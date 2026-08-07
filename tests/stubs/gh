@@ -29,9 +29,26 @@ JSON
     esac ;;
   issue)
     printf 'GH %s\n' "$*" >> "${GH_STUB_LOG:?}"
-    if [[ "${2:-}" == list && "${GH_STUB_MODE:-}" == issue-exists ]]; then
-      printf '7\n'
-    fi
+    case "${2:-}" in
+      list)
+        shift 2
+        filter=
+        while [[ $# -gt 0 ]]; do
+          if [[ "$1" == --jq ]]; then filter=${2:?"stub: --jq 缺少参数"}; break; fi
+          shift
+        done
+        [[ -n "$filter" ]] || filter='.'
+        # 同 api 分支：真跑调用方的 --jq，而不是自己按 GH_STUB_MODE 直接吐结果，
+        # 否则被测的「逐条字面比较标题」代码根本不会执行，断言只是«巧合通过»。
+        if [[ "${GH_STUB_MODE:-}" == issue-exists ]]; then
+          jq -r "$filter" <<'JSON'
+[{"number":7,"title":"发布受阻：v1.0-reF1nd-moonfruit"}]
+JSON
+        else
+          jq -r "$filter" <<<'[]'
+        fi
+        ;;
+    esac
     ;;
   pr)
     printf 'GH %s\n' "$*" >> "${GH_STUB_LOG:?}"

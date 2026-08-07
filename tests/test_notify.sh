@@ -37,6 +37,10 @@ logged=$(cat "$GH_STUB_LOG")
 assert_contains "$logged" "issue list"        "先检索既有 issue"
 assert_contains "$logged" "issue create"      "无既有 issue 时新建"
 assert_contains "$logged" "release-conflict"  "带 release-conflict 标签"
+# Important-1：不再依赖最终一致、按标点分词的 --search 索引，改用强一致的
+# 列表接口 + bash 里的字面比较（同 tap-bump.sh 的做法）
+assert_eq "$(grep -c -- '--search' "$GH_STUB_LOG" || true)" 0 \
+  "不再使用最终一致的 --search 索引"
 
 # 已有 issue 时只追加评论，不重复新建
 : > "$GH_STUB_LOG"
