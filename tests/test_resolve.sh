@@ -50,3 +50,39 @@ d=$(mktemp -d); make_fixture "$d" clean   # 干净仓库，从未进入过 rebas
 assert_fail "无 rebase 进行时 resolve_conflicts 拒绝执行" bash -c \
   "cd '$d' && SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 rm -rf "$d"
+
+# Important-4：build_prompt 里「patch 原本触及的文件」必须来自 $cur..ORIG_HEAD
+# （patch 自己的提交区间），而不是冲突现场里的 $cur..HEAD —— mid-rebase 时 HEAD
+# 已经站在新基点上，那个区间是「上游改了什么」。用一个专门的夹具把两种算法的
+# 结果照出差异：upstream 在冲突文件之外，还顺手改了一个 patch 从没碰过的文件。
+d=$(mktemp -d)
+git init -q -b main "$d"
+git -C "$d" config user.email t@example.com
+git -C "$d" config user.name  Tester
+printf 'line1\nline2\n' > "$d/app.go"
+printf 'other\n'        > "$d/other.go"
+printf 'third\n'        > "$d/third.go"
+git -C "$d" add . && git -C "$d" commit -qm 'upstream base' && git -C "$d" tag v1.0-reF1nd
+
+git -C "$d" checkout -q -b moonfruit
+printf 'line1\npatched\n' > "$d/app.go"
+git -C "$d" commit -qam 'personal patch'
+
+git -C "$d" checkout -q main
+printf 'line1\nupstream-changed\n' > "$d/app.go"     # 与 patch 冲突
+printf 'third-changed\n'           > "$d/third.go"   # patch 从没碰过的文件
+git -C "$d" commit -qam 'upstream moves on, touches an unrelated file too'
+git -C "$d" tag v1.1-reF1nd
+git -C "$d" checkout -q moonfruit
+
+( cd "$d" && bash "$HERE/../scripts/rebase.sh" v1.1-reF1nd moonfruit ) || true
+# 取标题行到下一个空行之间的全部内容（文件数不固定，不能只取「下一行」）。
+# 用 awk 而非 sed 的 `{n;p}` 花括号语法：BSD/GNU sed 对该语法的换行/分号
+# 要求不一致，awk 在两边都能跑。
+patch_files=$(cd "$d" && . "$HERE/../scripts/resolve.sh" \
+              && build_prompt v1.0-reF1nd v1.1-reF1nd \
+              | awk '/^该 patch 原本触及的文件：$/{f=1;next} f && NF==0{exit} f{print}')
+assert_eq "$patch_files" app.go \
+  "patch 原本触及的文件来自 \$cur..ORIG_HEAD（patch 自己的提交），不含 upstream 顺手改的 third.go"
+git -C "$d" rebase --abort 2>/dev/null || true
+rm -rf "$d"

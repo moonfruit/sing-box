@@ -19,7 +19,12 @@ RESOLVE_LOG=${RESOLVE_LOG:-$(git rev-parse --git-dir 2>/dev/null || echo .)/clau
 build_prompt() {
   local cur=$1 new=$2 conflicts patch_files msg
   conflicts=$(git diff --name-only --diff-filter=U)
-  patch_files=$(git diff --name-only "$cur..$(git rev-parse HEAD)" 2>/dev/null || true)
+  # 冲突现场里 HEAD 已经站在新基点上（rebase --onto 先把 HEAD 移到那，再逐个
+  # 重放 patch 提交）。$cur..HEAD 因此是「上游改了什么」，不是「patch 碰了什么」。
+  # patch 自己的提交区间是 $cur..ORIG_HEAD —— ORIG_HEAD 是 rebase 开始前
+  # 分支原本指向的提交，即 patch 栈变基前的旧 tip。
+  patch_files=$(git log --name-only --format= "$cur..$(git rev-parse ORIG_HEAD)" 2>/dev/null \
+                | sort -u || true)
   msg=$(git log -1 --format=%B REBASE_HEAD 2>/dev/null || printf '(无法读取)')
 
   cat <<PROMPT
