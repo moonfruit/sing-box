@@ -53,3 +53,13 @@ printf '<<<<<<< HEAD\n' >> "$d/app.go"
 assert_fail "assert_no_markers 命中冲突标记" \
   bash -c "cd '$d' && . '$HERE/../scripts/rebase.sh' && assert_no_markers"
 rm -rf "$d"
+
+# Minor：分支名不再硬编码 moonfruit，改走 INTEGRATION_BRANCH（默认值仍是
+# moonfruit，不影响上面所有用默认值的用例）。用一个真正叫别的名字的分支证明
+# 默认参数确实取的是这个环境变量，而不是常量。
+d=$(mktemp -d); make_fixture "$d" clean
+git -C "$d" branch -m moonfruit patch-stack
+assert_eq "$(cd "$d" && INTEGRATION_BRANCH=patch-stack bash -c \
+              '. "'"$HERE"'/../scripts/rebase.sh"; current_base')" \
+          v1.0-reF1nd "current_base 的分支名默认值来自 INTEGRATION_BRANCH，而非硬编码"
+rm -rf "$d"

@@ -8,6 +8,11 @@ REBASE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/lib.sh
 . "$REBASE_DIR/lib.sh"
 
+# 集成分支名：与其它脚本共用同一个环境变量（release.yml 顶层 env 里也是这个名字），
+# 默认值保持 moonfruit 不变。注意这与 moonfruit tag 后缀（-moonfruit[.N]，见
+# version.sh 的命名规则）是两个独立的常量，只是恰好同名，不应混为一谈。
+INTEGRATION_BRANCH=${INTEGRATION_BRANCH:-moonfruit}
+
 # current_base <branch> —— 从 git 历史反查当前基点，而非从 tag 名推导。
 # 这使得 rebase 步骤幂等：人工已在本地 rebase 并推送时，CI 重跑会自动跳过。
 #
@@ -15,7 +20,7 @@ REBASE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # 少了它，第一个 moonfruit tag 出现后基点会解析成 tag 自己，rebase --onto 的区间
 # 变成空区间，patch 被静默全部丢弃 —— 而三道闸门全会放行（无标记、能编译、测试过）。
 current_base() {
-  git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "${1:-moonfruit}"
+  git describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 "${1:-$INTEGRATION_BRANCH}"
 }
 
 # assert_no_markers —— 打 tag 前的硬性检查。已核对 reF1nd 源码树不含此类行，不会误报。
@@ -27,7 +32,7 @@ assert_no_markers() {
 
 # rebase_onto <new-base> <branch> —— 0 成功 / 2 冲突（现场保留）
 rebase_onto() {
-  local new=$1 branch=${2:-moonfruit} cur
+  local new=$1 branch=${2:-$INTEGRATION_BRANCH} cur
   cur=$(current_base "$branch")
   if [[ "$cur" == "$new" ]]; then
     log "集成分支已在 ${new} 上，跳过 rebase"
