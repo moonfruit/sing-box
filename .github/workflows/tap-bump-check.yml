@@ -1,0 +1,56 @@
+name: Tap bump check
+
+# 一次性的验证台：只跑 release.yml 里 tap-bump 那一段，针对一个已发布的 tag。
+# job 重跑用的是原 commit 的 workflow 文件，改动没法靠重跑验证；而完整 force run
+# 要半小时且会多出一次冗余发布。这里逐字镜像修好后的 tap-bump job，
+# 验证通过后本文件即可删除。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "已发布的 moonfruit tag，例如 v1.14.0-beta.8-reF1nd-moonfruit.5"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tap-bump:
+    name: 更新 Homebrew tap（验证）
+    runs-on: ubuntu-latest
+    container: ghcr.io/homebrew/brew:main
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+    steps:
+      # 以下四步与 release.yml 的 tap-bump job 保持逐字一致，改这里也要改那边。
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 取出自动化脚本
+        run: git clone --depth 1 --branch ci "https://github.com/${GITHUB_REPOSITORY}.git" ci
+
+      - name: 准备 Homebrew 环境
+        run: |
+          set -euo pipefail
+          git config --global user.name  'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config --global --add safe.directory "$PWD/ci"
+          command -v gh >/dev/null || brew install gh
+
+      - name: bump 并打 pr-pull
+        id: bump
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GH_PAT }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          brew tap moonfruit/tap
+          bash ci/scripts/tap-bump.sh "$TARGET"

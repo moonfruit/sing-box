@@ -473,10 +473,18 @@ jobs:
       # 必须排在 checkout 之前：容器以 linuxbrew 用户运行，写不了 runner 的
       # _temp 目录，checkout 会直接 EACCES。这个 action 负责把容器内的用户与
       # 权限理顺，tap 自己的 test-bot 也是这么起手的。
+      #
+      # token 只能给 GH_PAT。这个 action 会把它写成全局的
+      # http.https://github.com/.extraheader；git 走 libcurl，自定义的
+      # Authorization 头会顶掉 URL 里带的凭据。而 bump-formula-pr 恰恰是把
+      # HOMEBREW_GITHUB_API_TOKEN 拼进 push 的 URL 里的（bump.rb 的
+      # add_auth_token_to_url!），于是真正生效的是这个全局头 —— 给
+      # GITHUB_TOKEN 就只有本仓库的权限，推 tap 直接 403
+      # "Permission to moonfruit/homebrew-tap.git denied to github-actions[bot]"。
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@main
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       # 不用 actions/checkout：它会再装一个局部认证头，与 setup-homebrew 的全局头
       # 撞成 Duplicate header 400；而摘掉全局头又会让 setup-homebrew 的 post 清理
