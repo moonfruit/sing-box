@@ -2347,7 +2347,23 @@ git push
 
 **已知的类型/命名一致性**
 
-- `detect.sh` emit 的 key（`should_build`/`base`/`cur_base`/`target`/`prev_target`）与 `release.yml` 的 `detect.outputs.*` 一一对应。
+- `detect.sh` emit 的 key（`should_build`/`base`/`cur_base`/`target`/`prev_target`）与 `release.yml` 的 `detect.outputs.*` 一一对应。`prev_target` 是相对**新**基点算的，只给 `decide_build` 用；`review-pr.sh` 不再消费它（见下方「终审修复记录」C1）。
 - `rebase.sh` 的退出码约定（0/2）被 `release.yml` 的 `continue-on-error` + `steps.rebase.outcome` 消费。
-- `resolve.sh` 的 `newly_touched` 被 `review-pr.sh` 的 `pr_body` 调用，参数顺序 `<new_base> <prev_target> <cur_base>` 两处一致。
+- `resolve.sh` 的 `newly_touched` 被 `review-pr.sh` 的 `pr_body` 调用，参数顺序 `<new_base> <prev_target> <cur_base>` 两处一致；这里的 `prev_target` 由 `review-pr.sh` 自己的 `resolved_prev_target(cur_base)` 从旧基点下的 git tag 反查得到，不是 `detect.sh` 的同名 output。
 - `tap-bump.sh` emit 的 `tap_pr` 被 `release.yml` 的 `steps.bump.outputs.tap_pr` 消费。
+
+## 终审修复记录（2026-08-07）
+
+上述任务把方案落了地，但从未真正跑过冲突路径（`scripts/resolve.sh`、`scripts/review-pr.sh`）——每次 rebase 都是干净的。一次全分支终审假设「冲突路径明天就要真的跑一次」去审查这份实现，找出 3 个 Critical、10 个 Important、4 个 Minor 问题。逐条修复记录、C1/C2 的复现证据、每条新增断言的判别力证明、完整测试输出，都在
+`.superpowers/sdd/2026-08-06-patch-release-automation/final-fix-report.md`。
+
+这里只记概要，供以后改动这些脚本时知道「为什么长这样」：
+
+- **C1**：`review-pr.sh` 曾经消费 `detect.sh` 传来的 `prev_target`，但那是相对新基点算的，冲突发生时新基点上必然还没有 moonfruit tag，这个值恒空——审查 PR 里的 range-diff 与「新触及文件」两段永远是空的。改为 `review-pr.sh` 自带的 `resolved_prev_target(cur_base)`，从旧基点反查。
+- **C2**：`resolve_conflicts` 原本不校验「确有 rebase 在进行」；`rebase.sh` 因非冲突原因失败时同样报 `outcome == failure`，会被当成「已解决」误发布。现在函数开头即拒绝。
+- **C3**（代码部分）：`prepare` job 的 `src` checkout 不再 `persist-credentials`，需要推送的步骤改用 `scripts/lib.sh` 新增的 `git_auth_set`/`git_auth_clear` 现取现用——claude 运行期间 `.git/config` 里不再有可长期使用的凭据。
+- **Important 1/4/5/7/8**：`notify.sh` 的 issue 查重改走强一致的列表接口；`resolve.sh` 的 `build_prompt` 改用 `$cur..ORIG_HEAD` 计算 patch 自己触及的文件；闸门失败回退改用循环开始前捕获的字面 SHA，而非可被模型的 `git reset` 覆写的 `ORIG_HEAD` 引用；`git add -A` 前把 `git status` 快照写入日志；Important-8（空提交要求 `--skip`）经实测**不复现**——这个仓库使用的 git 默认走 merge backend，`git rebase --continue` 已经会自动丢弃空提交，未做改动。
+- **Important 2/3/6/9/10**：`release.yml` 里 Bark 一律排在开 issue 之前且后者失败不拦截前者；`/ship` 后补上清理 `auto/resolve-*`、`base/*` 分支并关闭审查 PR 的步骤；`claude-code` 的 npm 安装锁定版本并加冒烟测试；`detect.sh` 的 `latest_upstream_tag` 加白名单校验，`release.yml` 里插值进 shell 文本的 `${{ needs.detect.outputs.* }}` 改走 `env:`；`自动解决冲突` 步骤加 `timeout-minutes: 60`。
+- **Minor**：`rebase.sh` 的分支名默认值改走 `INTEGRATION_BRANCH`；`detect.sh` 一处 `&&` 链改成显式 `if`；`review-pr.sh` 的 `pr_body` 在解决日志为空时拒绝生成正文；新增 `.github/workflows/tests.yml`，push 到 `ci` 时跑 `bash tests/run.sh`。
+
+`tests/stubs/gh` 与 `tests/stubs/claude` 在此轮新增了 `issue list`（真跑 `--jq`）、`leave-corrupt`、`resolve-with-draft` 等分支/模式，均遵循「stub 必须真跑调用方的过滤条件，而不是按端点/模式直接吐固定结果」这条约束（`tests/stubs/gh` 已有的 `api`/`pr checks` 分支就是先例）。
