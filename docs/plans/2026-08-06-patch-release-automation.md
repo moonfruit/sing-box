@@ -2370,3 +2370,11 @@ git push
 - **Minor**：`rebase.sh` 的分支名默认值改走 `INTEGRATION_BRANCH`；`detect.sh` 一处 `&&` 链改成显式 `if`；`review-pr.sh` 的 `pr_body` 在解决日志为空时拒绝生成正文；新增 `.github/workflows/tests.yml`，push 到 `ci` 时跑 `bash tests/run.sh`。
 
 `tests/stubs/gh` 与 `tests/stubs/claude` 在此轮新增了 `issue list`（真跑 `--jq`）、`leave-corrupt`、`resolve-with-draft` 等分支/模式，均遵循「stub 必须真跑调用方的过滤条件，而不是按端点/模式直接吐固定结果」这条约束（`tests/stubs/gh` 已有的 `api`/`pr checks` 分支就是先例）。
+
+## 补记：tap-bump 改跑在官方 Homebrew 容器里
+
+宿主 ubuntu 镜像虽自带 linuxbrew，但要靠猜死路径塞进 PATH、要手工补 git 身份，
+且环境随 runner 镜像漂移 —— 这一类问题连着咬了三次（找不到 brew、无 git 身份、
+brew 静默退出）。改用 `container: ghcr.io/homebrew/brew:main`，与 tap 自己的
+test-bot 一致，是官方支持的环境。容器内没有 `gh`，用 `brew install gh` 补上；
+checkout 出的目录属主与运行用户不同，需 `git config --global --add safe.directory`。

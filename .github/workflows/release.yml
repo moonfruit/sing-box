@@ -467,20 +467,27 @@ jobs:
     name: 更新 Homebrew tap
     needs: [detect, release]
     runs-on: ubuntu-latest
+    # 跑在官方 Homebrew 容器里，与 tap 自己的 test-bot 一致。宿主 ubuntu 镜像虽然
+    # 自带 linuxbrew，但要靠猜死路径把它塞进 PATH、要手工补 git 身份，且环境随
+    # runner 镜像漂移 —— 这一类问题已经连着咬了三次。容器把它们一次性消掉。
+    container: ghcr.io/homebrew/brew:main
+    env:
+      HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
     steps:
       - uses: actions/checkout@v5
         with: { ref: ci }
+
       - name: 准备 Homebrew 环境
         run: |
           set -euo pipefail
-          # ubuntu 镜像自带 Homebrew，但默认不在 PATH 上
-          brew_bin=/home/linuxbrew/.linuxbrew/bin
-          [[ -x "$brew_bin/brew" ]] || { echo "::error::runner 上找不到 $brew_bin/brew" >&2; exit 1; }
-          echo "$brew_bin" >> "$GITHUB_PATH"
           # bump-formula-pr 会在 brew 自己的 tap 克隆里 git commit，那里不在
           # actions/checkout 的作用范围内，没有全局身份就会 fatal: empty ident name
           git config --global user.name  'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # 容器里 checkout 出来的目录属主与运行用户不同，git 会拒绝操作
+          git config --global --add safe.directory "$PWD"
+          # 容器内没有 gh；tap-bump.sh 用它查 CI 状态并打标签
+          command -v gh >/dev/null || brew install gh
 
       - name: bump 并打 pr-pull
         id: bump

@@ -44,8 +44,9 @@ tap_bump() {
   # brew 会把它开出的 PR 链接打在输出里，直接取那个号。
   # 不要改用 gh pr list --search：GitHub 的搜索索引是最终一致的，PR 刚建出来
   # 几秒内搜不到；而且搜索按标点分词，这个版本串标点极多，in:title 未必字面匹配。
-  out=$(brew bump-formula-pr --version="$version" --no-audit --no-browse "$TAP_FORMULA" 2>&1)
-  printf '%s\n' "$out"
+  # 经 tee 边流边存：直接 out=$(...) 的话，brew 一失败 set -e 就在赋值处退出，
+  # 后面的 printf 永远执行不到，它的诊断信息随之石沉大海（这正好坑过一次）。
+  out=$(brew bump-formula-pr --version="$version" --no-audit --no-browse "$TAP_FORMULA" 2>&1 | tee /dev/stderr)
 
   num=$(printf '%s\n' "$out" | sed -n 's|.*/pull/\([0-9][0-9]*\).*|\1|p' | tail -n1)
 
