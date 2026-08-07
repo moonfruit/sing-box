@@ -31,6 +31,12 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # setup-homebrew 会装一个全局的 git 认证头，actions/checkout 还会再加一个
+      # 局部的，两个 Authorization 撞在一起服务端直接 400。checkout 自带凭据，
+      # 摘掉全局那个即可。
+      - name: 摘掉全局 git 认证头
+        run: git config --global --unset-all http.https://github.com/.extraheader || true
+
       - uses: actions/checkout@v5
         with: { ref: ci }
 
