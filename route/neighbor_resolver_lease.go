@@ -46,8 +46,32 @@ func ReloadLeaseFiles(leaseFiles []string) (leaseIPToMAC map[netip.Addr]net.Hard
 	return
 }
 
+// Any absolute expiry timestamp a lease file can carry is far above this
+// value, while any remaining lease duration is far below it.
+const absoluteExpiryMinimum = 1 << 30
+
+// dnsmasq compiled with HAVE_BROKEN_RTC, the default on routers without a
+// battery-backed clock, stores the remaining lease seconds instead of an
+// absolute expiry timestamp, relative to the last time the file was written.
+func isLeaseExpired(expiry int64, fileTime int64, now int64) bool {
+	if expiry == 0 {
+		return false
+	}
+	if expiry < absoluteExpiryMinimum {
+		if fileTime == 0 {
+			return false
+		}
+		return fileTime+expiry < now
+	}
+	return expiry < now
+}
+
 func parseDnsmasqOdhcpd(file *os.File, ipToMAC map[netip.Addr]net.HardwareAddr, ipToHostname map[netip.Addr]string, macToHostname map[string]string) {
 	now := time.Now().Unix()
+	var fileTime int64
+	if info, err := file.Stat(); err == nil {
+		fileTime = info.ModTime().Unix()
+	}
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -66,7 +90,7 @@ func parseDnsmasqOdhcpd(file *os.File, ipToMAC map[netip.Addr]net.HardwareAddr, 
 		if err != nil {
 			continue
 		}
-		if expiry != 0 && expiry < now {
+		if isLeaseExpired(expiry, fileTime, now) {
 			continue
 		}
 		if strings.Contains(fields[1], ":") {
