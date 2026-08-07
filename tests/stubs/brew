@@ -2,3 +2,5 @@
 # brew 的测试替身：把参数记到 $BREW_STUB_LOG。
 set -euo pipefail
 printf 'BREW %s\n' "$*" >> "${BREW_STUB_LOG:?}"
+# 真实的 bump-formula-pr 会把它开出的 PR 链接打在输出里，脚本据此取号
+printf 'https://github.com/moonfruit/homebrew-tap/pull/42\n'

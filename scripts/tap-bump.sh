@@ -14,14 +14,29 @@ TAP_REPO=${TAP_REPO:-moonfruit/homebrew-tap}
 
 # tap_bump <target-tag>
 tap_bump() {
-  local target=$1 version=${1#v} num
+  local target=$1 version=${1#v} out num
 
-  brew bump-formula-pr --version="$version" --no-audit --no-browse "$TAP_FORMULA"
+  # brew 会把它开出的 PR 链接打在输出里，直接取那个号。
+  # 不要改用 gh pr list --search：GitHub 的搜索索引是最终一致的，PR 刚建出来
+  # 几秒内搜不到；而且搜索按标点分词，这个版本串标点极多，in:title 未必字面匹配。
+  out=$(brew bump-formula-pr --version="$version" --no-audit --no-browse "$TAP_FORMULA" 2>&1)
+  printf '%s\n' "$out"
 
-  num=$(GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN:?}" \
-        gh pr list --repo "$TAP_REPO" --state open \
-          --search "$version in:title" --json number --jq '.[0].number // empty')
-  [[ -n "$num" ]] || die "未找到 ${TAP_REPO} 中版本 ${version} 的 PR"
+  num=$(printf '%s\n' "$out" | sed -n 's|.*/pull/\([0-9][0-9]*\).*|\1|p' | tail -n1)
+
+  # 兜底：按标题在列表接口里精确匹配（列表是强一致的，不走搜索索引）。
+  # gh 的 --jq 不支持 --arg，所以取出 TSV 后在 bash 里做字面比较。
+  if [[ -z "$num" ]]; then
+    log "未能从 brew 输出中解析 PR 号，改用列表接口按标题匹配"
+    local want="sing-box-ref1nd ${version}"
+    num=$(GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN:?}" \
+          gh pr list --repo "$TAP_REPO" --state open --limit 100 \
+            --json number,title --jq '.[] | "\(.number)\t\(.title)"' \
+          | while IFS=$'\t' read -r n t; do
+              if [[ "$t" == "$want" ]]; then printf '%s\n' "$n"; break; fi
+            done)
+  fi
+  [[ -n "$num" ]] || die "未能确定 ${TAP_REPO} 中版本 ${version} 对应的 PR"
 
   GH_TOKEN="${HOMEBREW_GITHUB_API_TOKEN}" \
     gh pr edit "$num" --repo "$TAP_REPO" --add-label pr-pull
