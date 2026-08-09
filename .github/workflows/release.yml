@@ -25,11 +25,8 @@ permissions:
 env:
   UPSTREAM_REPO: reF1nd/sing-box
   INTEGRATION_BRANCH: moonfruit
-  GO_VERSION: "~1.25.9"
-  # 锁版本：不锁的话，claude-code 一旦改名/移除 --permission-mode auto，
-  # 冲突解决器会在唯一真正用得上它的那天失效，而日志上跟「解不开冲突」同形，
-  # 排查时会先怀疑错方向。定期手动升级这个版本号。
-  CLAUDE_CODE_VERSION: "2.1.224"
+  # setup-go 的别名，始终取当前最新稳定版 Go
+  GO_VERSION: "stable"
 
 concurrency:
   group: release
@@ -55,11 +52,11 @@ jobs:
       ship_ref:     ${{ steps.ship.outputs.ship_ref }}
     steps:
       - name: 取出自动化分支
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with: { ref: ci, path: ci }
 
       - name: 取出完整仓库
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with: { fetch-depth: 0, path: src }
 
       - name: 拉取 reF1nd 的 tag 并落地集成分支
@@ -125,9 +122,9 @@ jobs:
       # prepare 自己已经发过专属通知的路径，notify-failure 据此避让
       notified: ${{ steps.review.outputs.notified || steps.conflict.outputs.notified }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { ref: ci, path: ci }
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: src
@@ -140,7 +137,7 @@ jobs:
           # 的步骤，改为用 scripts/lib.sh 的 git_auth_set/git_auth_clear
           # 现取现用、用完即清。
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: 配置 git 身份并拉取 reF1nd tag
@@ -191,9 +188,10 @@ jobs:
           BASE:     ${{ needs.detect.outputs.base }}
         run: |
           set -euo pipefail
-          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          # 冒烟测试：--permission-mode auto 这类 CLI 参数一旦改名，装上的版本
-          # 却打不动，日志上跟「模型解不开冲突」同形，先在这里就地暴露出来。
+          npm install -g @anthropic-ai/claude-code@latest
+          # 冒烟测试：不锁版本，--permission-mode auto 这类 CLI 参数哪天改名/移除，
+          # 冲突解决器就会在唯一真正用得上它的那天失效，而日志上跟「模型解不开冲突」
+          # 同形，排查时容易先怀疑错方向 —— 先在这里就地暴露出来。
           claude --version
           bash ../ci/scripts/resolve.sh "$CUR_BASE" "$BASE"
 
@@ -323,11 +321,11 @@ jobs:
       matrix:
         variant: [purego, glibc, musl]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.detect.outputs.target }}
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with: { go-version: "${{ env.GO_VERSION }}" }
 
       - name: 组装 build tags
@@ -373,7 +371,7 @@ jobs:
 
       - name: 缓存 Chromium 工具链
         if: matrix.variant != 'purego'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/cronet-go/naiveproxy/src/third_party/llvm-build/
@@ -437,7 +435,7 @@ jobs:
           rm -r "$DIR_NAME" sing-box
           rm -f libcronet.so
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-linux_arm64-${{ matrix.variant }}
           path: dist
@@ -449,9 +447,9 @@ jobs:
     needs: [detect, prepare, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with: { path: dist, merge-multiple: true }
       - name: 创建 Release
         env:
@@ -595,7 +593,7 @@ jobs:
     if: failure() && needs.prepare.outputs.notified == ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with: { ref: ci }
       - env:
           GH_TOKEN: ${{ github.token }}
