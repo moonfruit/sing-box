@@ -346,17 +346,25 @@ jobs:
             echo "VERSION=${TARGET#v}"
           } >> "$GITHUB_ENV"
 
+      # purego 不编译 C 代码，只需要 cronet-go 仓库里那份预编译的 libcronet.so
+      # （见下面「提取 libcronet.so」），克隆源码与 Chromium 工具链这几步整个跳过。
+      # sparse-checkout 排除 /lib：自 cronet-go ec9a39c 起，20+ 个平台的预编译
+      # libcronet.{a,so}（单个 .a 就有 60 MB）直接提交进了仓库，全量拉会平白
+      # 多下 1 GB 以上。
       - name: 克隆 cronet-go
+        if: matrix.variant != 'purego'
         run: |
           set -xeuo pipefail
           CRONET_GO_VERSION=$(cat .github/CRONET_GO_VERSION)
           git init ~/cronet-go
           git -C ~/cronet-go remote add origin https://github.com/sagernet/cronet-go.git
-          git -C ~/cronet-go fetch --depth=1 origin "$CRONET_GO_VERSION"
+          git -C ~/cronet-go sparse-checkout set --no-cone '/*' '!/lib'
+          git -C ~/cronet-go fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"
           git -C ~/cronet-go checkout FETCH_HEAD
           git -C ~/cronet-go submodule update --init --recursive --depth=1
 
       - name: 重建 Debian keyring
+        if: matrix.variant != 'purego'
         run: |
           set -xeuo pipefail
           rm -f ~/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
@@ -364,6 +372,7 @@ jobs:
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
 
       - name: 缓存 Chromium 工具链
+        if: matrix.variant != 'purego'
         uses: actions/cache@v4
         with:
           path: |
@@ -374,6 +383,7 @@ jobs:
           key: chromium-toolchain-arm64-${{ matrix.variant }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
 
       - name: 下载工具链并注入环境
+        if: matrix.variant != 'purego'
         run: |
           set -xeuo pipefail
           cd ~/cronet-go
@@ -395,12 +405,21 @@ jobs:
             -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${VERSION}' ${LDFLAGS_SHARED} -s -w -buildid=" \
             ./cmd/sing-box
 
+      # cronet-go ec9a39c（上游 7afc0aa2b「Update naiveproxy to v150.0.7871.63-1」
+      # 引入）删掉了 build-naive 的 extract-lib 子命令，改把预编译产物直接提交进
+      # 仓库。这里跟官方 build.yml 一样，单独稀疏检出那一个文件。
       - name: 提取 libcronet.so
         if: matrix.variant == 'purego'
         run: |
           set -xeuo pipefail
-          cd ~/cronet-go
-          CGO_ENABLED=0 go run -v ./cmd/build-naive extract-lib --target linux/arm64 -o "$GITHUB_WORKSPACE/dist"
+          CRONET_GO_VERSION=$(cat .github/CRONET_GO_VERSION)
+          LIBRARY_PATH="lib/linux_arm64/libcronet.so"
+          git init "$RUNNER_TEMP/cronet-go-lib"
+          git -C "$RUNNER_TEMP/cronet-go-lib" remote add origin https://github.com/sagernet/cronet-go.git
+          git -C "$RUNNER_TEMP/cronet-go-lib" sparse-checkout set --no-cone "/$LIBRARY_PATH"
+          git -C "$RUNNER_TEMP/cronet-go-lib" fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"
+          git -C "$RUNNER_TEMP/cronet-go-lib" checkout FETCH_HEAD
+          cp "$RUNNER_TEMP/cronet-go-lib/$LIBRARY_PATH" dist/
 
       - name: 打包
         run: |
