@@ -25,8 +25,18 @@ permissions:
 env:
   UPSTREAM_REPO: reF1nd/sing-box
   INTEGRATION_BRANCH: moonfruit
-  # setup-go 的别名，始终取当前最新稳定版 Go
-  GO_VERSION: "stable"
+  # 钉在 1.26。Go 1.27 起，transport/v2rayhttp/force_close.go 里那条
+  #   //go:linkname transportConnPool golang.org/x/net/http2.(*Transport).connPool
+  # 在链接期报 "relocation target ... not defined"：x/net 侧没有配套的 push
+  # linkname，这个符号留不留得住取决于编译器对该方法的内联/裁剪决策，1.27 不再
+  # 留了。上游 sing-box 至今未动过这个文件，与本 fork 的 patch 无关；实测
+  # beta.17 与 rc.1 两个 tag 在 1.26.6 下都能编、在 1.27.0 下都编不过。
+  # homebrew-core 的 sing-box 撞上同一堵墙、同样钉了 go@1.26，本 tap 的
+  # sing-box-ref1nd.rb 已跟进。等 SagerNet/sing-box#4182 落地后改回 "stable"。
+  #
+  # 用系列号而非某个补丁号：与 tap 侧的 go@1.26 保持同一口径（Homebrew 只能钉到
+  # 系列），同时还能跟上 1.26.x 的安全补丁。
+  GO_VERSION: "1.26"
 
 concurrency:
   group: release
