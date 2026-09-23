@@ -496,6 +496,14 @@ func New(options Options) (*Box, error) {
 			return nil, E.Cause(err, "create clash-server")
 		}
 		internalServices = append(internalServices, clashServer)
+		if clashHTTPServer, isClashHTTPServer := clashServer.(adapter.ClashHTTPServer); isClashHTTPServer {
+			for _, it := range serviceManager.Services() {
+				host, isHost := it.(adapter.ClashHTTPServerHost)
+				if isHost && host.AttachClashServer(clashHTTPServer) {
+					break
+				}
+			}
+		}
 	}
 	if needV2RayAPI {
 		v2rayServer, err := experimental.NewV2RayServer(logFactory.NewLogger("v2ray-api"), common.PtrValueOrDefault(experimentalOptions.V2RayAPI))
