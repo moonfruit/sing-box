@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/sagernet/sing-box/common/hash"
@@ -15,6 +16,21 @@ import (
 type URLTestHistory struct {
 	Time  time.Time `json:"time"`
 	Delay uint16    `json:"delay"`
+}
+
+// ClashHTTPServer is a Clash API server that can be served by the listener of an
+// API service configured with the same listen address.
+type ClashHTTPServer interface {
+	LifecycleService
+	ExternalController() string
+	Secret() string
+	HTTPHandler() http.Handler
+	SetListenerOwner(owner string)
+}
+
+// ClashHTTPServerHost is a service that can serve a ClashHTTPServer on its own listener.
+type ClashHTTPServerHost interface {
+	AttachClashServer(server ClashHTTPServer) bool
 }
 
 type V2RayServer interface {
