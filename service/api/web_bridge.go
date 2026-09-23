@@ -20,13 +20,19 @@ const (
 	contentTypeGRPC        = "application/grpc"
 	contentTypeGRPCWeb     = "application/grpc-web"
 	contentTypeGRPCWebText = "application/grpc-web-text"
+
+	grpcRoutePrefix          = "/daemon."
+	observabilityRoutePrefix = "/observability/v1"
 )
 
 // newHTTPHandler additionally accepts gRPC-Web requests
 // (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) and gRPC-Web
 // streams over WebSocket, wire compatible with the improbable-eng/grpc-web
 // client transports.
-func newHTTPHandler(logger log.ContextLogger, grpcServer *grpc.Server, options option.APIServiceOptions, dashboard *dashboard, observability http.Handler) http.Handler {
+//
+// If clashHandler is not nil, requests not belonging to the API service are
+// routed to it before CORS handling, so each side keeps its own CORS options.
+func newHTTPHandler(logger log.ContextLogger, grpcServer *grpc.Server, options option.APIServiceOptions, dashboard *dashboard, observability http.Handler, clashHandler http.Handler) http.Handler {
 	allowedOrigins := options.AccessControlAllowOrigin
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = []string{"*"}
@@ -39,12 +45,41 @@ func newHTTPHandler(logger log.ContextLogger, grpcServer *grpc.Server, options o
 		AllowPrivateNetwork: options.AccessControlAllowPrivateNetwork,
 		MaxAge:              300,
 	})
-	return corsHandler.Handler(&webBridge{
+	apiHandler := corsHandler.Handler(&webBridge{
 		logger:        logger,
 		grpcServer:    grpcServer,
 		dashboard:     dashboard,
 		observability: observability,
 	})
+	if clashHandler == nil {
+		return apiHandler
+	}
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if isAPIRequest(request) {
+			apiHandler.ServeHTTP(writer, request)
+		} else {
+			clashHandler.ServeHTTP(writer, request)
+		}
+	})
+}
+
+// isAPIRequest matches gRPC method paths (including CORS preflights of
+// gRPC-Web requests, which carry no gRPC content type), the dashboard, the
+// observability API and any gRPC request.
+func isAPIRequest(request *http.Request) bool {
+	path := request.URL.Path
+	switch {
+	case strings.HasPrefix(path, grpcRoutePrefix):
+		return true
+	case path == strings.TrimSuffix(dashboardRoutePrefix, "/") || strings.HasPrefix(path, dashboardRoutePrefix):
+		return true
+	case path == observabilityRoutePrefix || strings.HasPrefix(path, observabilityRoutePrefix+"/"):
+		return true
+	case isWebSocketGRPCRequest(request):
+		return true
+	default:
+		return strings.HasPrefix(request.Header.Get("Content-Type"), contentTypeGRPC)
+	}
 }
 
 type webBridge struct {
@@ -57,7 +92,7 @@ type webBridge struct {
 func (b *webBridge) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	contentType := request.Header.Get("Content-Type")
 	switch {
-	case b.observability != nil && (request.URL.Path == "/observability/v1" || strings.HasPrefix(request.URL.Path, "/observability/v1/")):
+	case b.observability != nil && (request.URL.Path == observabilityRoutePrefix || strings.HasPrefix(request.URL.Path, observabilityRoutePrefix+"/")):
 		b.observability.ServeHTTP(writer, request)
 	case isWebSocketGRPCRequest(request):
 		b.serveWebSocket(writer, request)
