@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
+	"strconv"
 
 	"github.com/sagernet/sing-box/adapter"
 	boxService "github.com/sagernet/sing-box/adapter/service"
@@ -30,11 +32,12 @@ func RegisterService(registry *boxService.Registry) {
 
 type Service struct {
 	boxService.Adapter
-	logger    log.ContextLogger
-	options   option.APIServiceOptions
-	listener  *listener.Listener
-	tlsConfig tls.ServerConfig
-	dashboard *dashboard
+	logger      log.ContextLogger
+	options     option.APIServiceOptions
+	listener    *listener.Listener
+	tlsConfig   tls.ServerConfig
+	dashboard   *dashboard
+	clashServer adapter.ClashHTTPServer
 }
 
 func NewService(ctx context.Context, logger log.ContextLogger, tag string, options option.APIServiceOptions) (adapter.Service, error) {
@@ -77,9 +80,15 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		grpcServer.Stop()
 		return nil
 	})
+	secrets := []string{s.options.Secret}
+	var clashHandler http.Handler
+	if s.clashServer != nil {
+		secrets = append(secrets, s.clashServer.Secret())
+		clashHandler = s.clashServer.HTTPHandler()
+	}
 	var observabilityHandler http.Handler
 	if observabilityService := service.FromContext[observability.Service](ctx); observabilityService != nil {
-		observabilityHandler = authenticateObservability(s.options.Secret, http.StripPrefix("/observability/v1", observabilityService.Handler()))
+		observabilityHandler = authenticateObservability(http.StripPrefix(observabilityRoutePrefix, observabilityService.Handler()), secrets...)
 	}
 	if s.dashboard != nil {
 		err := s.dashboard.start(ctx)
@@ -90,7 +99,7 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	}
 	httpServer := &http.Server{
 		//nolint:staticcheck
-		Handler: h2c.NewHandler(newHTTPHandler(s.logger, grpcServer, s.options, s.dashboard, observabilityHandler), new(http2.Server)),
+		Handler: h2c.NewHandler(newHTTPHandler(s.logger, grpcServer, s.options, s.dashboard, observabilityHandler, clashHandler), new(http2.Server)),
 		BaseContext: func(net.Listener) context.Context {
 			return ctx
 		},
@@ -117,6 +126,9 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		tcpListener = aTLS.NewListener(tcpListener, s.tlsConfig)
 	}
 	scope.Add(httpServer.Close)
+	if s.clashServer != nil {
+		s.logger.Info("serving clash api on shared listener")
+	}
 	go func() {
 		serveErr := httpServer.Serve(tcpListener)
 		if serveErr != nil && ctx.Err() == nil {
@@ -126,9 +138,50 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	return nil
 }
 
-func authenticateObservability(secret string, next http.Handler) http.Handler {
+// AttachClashServer serves the Clash API on this service's listener when both
+// are configured with the same listen address. Each side keeps its own secret
+// and CORS options.
+func (s *Service) AttachClashServer(server adapter.ClashHTTPServer) bool {
+	if !sameListenAddress(s.options.ListenOptions, server.ExternalController()) {
+		return false
+	}
+	s.clashServer = server
+	server.SetListenerOwner("service/" + s.Type() + "[" + s.Tag() + "]")
+	return true
+}
+
+func sameListenAddress(options option.ListenOptions, address string) bool {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 || uint16(port) != options.ListenPort {
+		return false
+	}
+	listenAddr := options.Listen.Build(netip.AddrFrom4([4]byte{127, 0, 0, 1})).Unmap()
+	if host == "" {
+		return listenAddr.IsUnspecified()
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	return addr == listenAddr || addr.IsUnspecified() && listenAddr.IsUnspecified()
+}
+
+// authenticateObservability accepts any configured secret; empty secrets are
+// ignored, and no authentication is required if none is configured.
+func authenticateObservability(next http.Handler, secrets ...string) http.Handler {
+	secrets = common.Filter(secrets, func(it string) bool {
+		return it != ""
+	})
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if secret == "" || request.Header.Get("Authorization") == "Bearer "+secret {
+		authorization := request.Header.Get("Authorization")
+		if len(secrets) == 0 || common.Any(secrets, func(it string) bool {
+			return authorization == "Bearer "+it
+		}) {
 			next.ServeHTTP(writer, request)
 			return
 		}
