@@ -41,7 +41,7 @@ func init() {
 	experimental.RegisterClashServerConstructor(NewServer)
 }
 
-var _ adapter.LifecycleService = (*Server)(nil)
+var _ adapter.ClashHTTPServer = (*Server)(nil)
 
 type Server struct {
 	ctx            context.Context
@@ -58,6 +58,8 @@ type Server struct {
 	urlTestHistory *urltest.HistoryStorage
 	clashMode      *clashmode.Manager
 	logDebug       bool
+	secret         string
+	listenerOwner  string
 
 	externalController        bool
 	externalUI                string
@@ -114,6 +116,7 @@ func NewServer(ctx context.Context, logFactory log.ObservableFactory, options op
 		urlTestHistory:            urlTestHistory,
 		clashMode:                 clashMode,
 		logDebug:                  logFactory.Level() >= log.LevelDebug,
+		secret:                    options.Secret,
 		externalController:        options.ExternalController != "",
 		externalUIDownloadURL:     downloadURL,
 		externalUIDownloadURLHash: sha256.Sum256([]byte(downloadURL)),
@@ -185,6 +188,24 @@ func (s *Server) Name() string {
 	return "clash server"
 }
 
+func (s *Server) ExternalController() string {
+	return s.httpServer.Addr
+}
+
+func (s *Server) Secret() string {
+	return s.secret
+}
+
+func (s *Server) HTTPHandler() http.Handler {
+	return s.httpServer.Handler
+}
+
+// SetListenerOwner makes the server skip its own listener, as the owner serves
+// HTTPHandler on a listener with the same address.
+func (s *Server) SetListenerOwner(owner string) {
+	s.listenerOwner = owner
+}
+
 func (s *Server) Start(stage adapter.StartStage) error {
 	switch stage {
 	case adapter.StartStateStart:
@@ -212,6 +233,10 @@ func (s *Server) Start(stage adapter.StartStage) error {
 		if s.externalUI != "" && s.externalUIUpdateInterval > 0 {
 			s.updateDone = make(chan struct{})
 			go s.loopUpdate()
+		}
+		if s.listenerOwner != "" {
+			s.logger.Info("restful api sharing listener with ", s.listenerOwner, " at ", s.httpServer.Addr)
+			break
 		}
 		var (
 			listener net.Listener
