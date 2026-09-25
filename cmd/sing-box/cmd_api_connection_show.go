@@ -70,6 +70,7 @@ func runAPIConnectionShow(connectionID string) error {
 	block.addLine("Source", connection.GetSource())
 	block.addLine("Destination", connection.GetDestination())
 	block.addLine("Domain", connection.GetDomain())
+	block.addLine("Sniff host", connection.GetSniffHost())
 	block.addLine("User", connection.GetUser())
 	block.addLine("Process", formatProcessInfo(connection.GetProcessInfo()))
 	block.addLine("Rule", connection.GetRule())
