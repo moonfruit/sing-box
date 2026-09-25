@@ -201,6 +201,8 @@ message Connection {
   string outboundType = 20;
   repeated string chainList = 21;
   ProcessInfo processInfo = 22;
+  // Fields added by this fork start at 1000, away from upstream numbering.
+  string sniffHost = 1000;
 }
 
 message ProcessInfo {
