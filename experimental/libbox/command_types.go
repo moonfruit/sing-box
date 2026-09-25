@@ -276,6 +276,7 @@ type Connection struct {
 	Source        string
 	Destination   string
 	Domain        string
+	SniffHost     string
 	Protocol      string
 	User          string
 	FromOutbound  string
@@ -392,6 +393,7 @@ func connectionFromGRPC(conn *daemon.Connection) Connection {
 		Source:        conn.Source,
 		Destination:   conn.Destination,
 		Domain:        conn.Domain,
+		SniffHost:     conn.SniffHost,
 		Protocol:      conn.Protocol,
 		User:          conn.User,
 		FromOutbound:  conn.FromOutbound,
