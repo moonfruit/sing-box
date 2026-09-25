@@ -50,8 +50,11 @@ ${patch_files}
 2. 若属于 (b)，必须检查该 patch 触及的所有文件以及相关调用点，
    不要只改冲突文件。
 3. 解决冲突，删除全部冲突标记。
-4. 自行运行 \`go build -tags "\$(cat release/DEFAULT_BUILD_TAGS)" ./cmd/sing-box\`
-   与 \`go test ./...\` 验证，直到通过。
+4. 自行运行
+   \`CGO_ENABLED=0 go build -o /dev/null -tags "\$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box\`
+   与 \`go test ./...\` 验证，直到通过。构建必须带 with_purego 且关闭 CGO：
+   with_naive_outbound 的 CGO 版本需要 Chromium 工具链才能链接 libcronet.a，
+   这里没有，链接失败与你的改动无关。
 5. 最后用中文简述你的判断与改动理由。不要执行任何 git commit 或 git rebase 命令。
 PROMPT
 }
@@ -67,7 +70,13 @@ gate_markers() {
 gate_build() {
   [[ -z "${SKIP_GO_GATES:-}" ]] || { log "闸门②：已跳过"; return 0; }
   log "闸门②：go build"
-  go build -tags "$(cat release/DEFAULT_BUILD_TAGS)" ./cmd/sing-box
+  # 按 build job 的 purego 变体来编：DEFAULT_BUILD_TAGS 含 with_naive_outbound，
+  # 其 CGO 版本要链接 cronet-go 用 Chromium clang/lld 预编译的 libcronet.a，
+  # runner 自带的 gcc/ld 报 "skipping incompatible" 而链接失败。purego 不链接
+  # C 代码，Go 侧的类型检查与链接照样完整覆盖，足以承担这道闸门的职责。
+  # -o /dev/null：不在工作区里留下 sing-box 二进制。
+  CGO_ENABLED=0 go build -o /dev/null \
+    -tags "$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box
 }
 
 gate_test() {

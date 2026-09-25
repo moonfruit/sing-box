@@ -212,7 +212,7 @@ prompt 只负责给出线索并划定边界：
 | # | 检查 | 目的 |
 | --- | --- | --- |
 | ① | `git grep -n '^<<<<<<< '` 无命中 | 防冲突标记残留 |
-| ② | `go build -tags "$(cat release/DEFAULT_BUILD_TAGS)" ./cmd/sing-box` 通过 | 防语法/类型错误，兼查跨文件 API 适配是否完整 |
+| ② | `CGO_ENABLED=0 go build -o /dev/null -tags "$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box` 通过 | 防语法/类型错误，兼查跨文件 API 适配是否完整。按 purego 变体编：`with_naive_outbound` 的 CGO 版本需要 Chromium 工具链才能链接 `libcronet.a` |
 | ③ | 根模块 `go test ./...` 通过（不含 `test/` 子模块，那是需要 Docker 的集成测试） | 防行为回归 |
 
 任一失败即 `git rebase --abort`，不推分支、不打 tag。
