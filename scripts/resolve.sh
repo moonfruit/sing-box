@@ -52,9 +52,12 @@ ${patch_files}
 3. 解决冲突，删除全部冲突标记。
 4. 自行运行
    \`CGO_ENABLED=0 go build -o /dev/null -tags "\$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box\`
-   与 \`go test ./...\` 验证，直到通过。构建必须带 with_purego 且关闭 CGO：
+   与 \`go test -ldflags "\$(cat release/LDFLAGS)" -skip '${GATE_TEST_SKIP}' ./...\`
+   验证，直到通过。构建必须带 with_purego 且关闭 CGO：
    with_naive_outbound 的 CGO 版本需要 Chromium 工具链才能链接 libcronet.a，
-   这里没有，链接失败与你的改动无关。
+   这里没有，链接失败与你的改动无关。测试必须带 release 的 LDFLAGS（其中的
+   -checklinkname=0 放行了 libbox 对标准库内部符号的 linkname 引用），并跳过
+   在本机没有权限运行的测试。
 5. 最后用中文简述你的判断与改动理由。不要执行任何 git commit 或 git rebase 命令。
 PROMPT
 }
@@ -79,10 +82,20 @@ gate_build() {
     -tags "$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box
 }
 
+# 闸门③跳过的测试：在 GitHub runner 上没有权限跑，与 patch 无关。
+#   TestUnshareNamespace（common/netns）：以新建 network namespace 的方式重新
+#   拉起 /proc/self/exe，runner 不允许非特权进程建 user namespace，报
+#   "operation not permitted"。
+GATE_TEST_SKIP='^TestUnshareNamespace$'
+
 gate_test() {
   [[ -z "${SKIP_GO_GATES:-}" ]] || { log "闸门③：已跳过"; return 0; }
   log "闸门③：go test（根模块，不含需要 Docker 的 test/ 子模块）"
-  go test ./...
+  # 必须带上 release 的 LDFLAGS：其中的 -checklinkname=0 放行了
+  # experimental/libbox/internal/oomprofile 对 runtime/pprof 内部符号的
+  # //go:linkname 引用。Go 1.23 起链接器默认拒绝这种引用，不带它的话，
+  # libbox 与 boxdd 的测试二进制在任何基点上都链接失败，闸门③永远过不去。
+  go test -ldflags "$(cat release/LDFLAGS)" -skip "$GATE_TEST_SKIP" ./...
 }
 
 # newly_touched <new_base> <prev_target> <cur_base>

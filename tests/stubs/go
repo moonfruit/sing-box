@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# go 的测试替身：把收到的参数逐行写进 GO_STUB_LOG，用来断言闸门②③传给
+# go 的参数，而不必在夹具仓库里真的放一份 Go 代码。
+set -euo pipefail
+printf '%s\n' "$@" > "${GO_STUB_LOG:?GO_STUB_LOG 未设置}"

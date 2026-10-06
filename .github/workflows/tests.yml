@@ -2,16 +2,33 @@ name: Tests
 
 # 让 scripts/、tests/ 与 release.yml 本身有一道最基础的守门：push 到 ci 分支时
 # 跑一遍 tests/run.sh（含 actionlint，用来校验 release.yml 本身）。
+#
+# 另有每日定时的 gates：在真实代码上空跑冲突解决的闸门②③。闸门只在 rebase
+# 冲突时才执行，平时没有任何路径会跑到它；基点自身让闸门挂掉的问题（例如
+# 闸门③缺了 release 的 LDFLAGS、runner 上没权限的测试）只会在某天碰上冲突时
+# 才暴露，届时无论冲突解得对不对，发布都会被中止。
 on:
   push:
     branches: [ci]
+  # 早于 Release（04:00 UTC）一小时，赶在当天可能的冲突之前发现问题
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  UPSTREAM_REPO: reF1nd/sing-box
+  INTEGRATION_BRANCH: moonfruit
+  # 必须与 release.yml 的 GO_VERSION 一致（tests/test_workflows.sh 守着），
+  # 否则这里验证的是另一个 Go 版本下的闸门。
+  GO_VERSION: "1.26"
+
 jobs:
   test:
     name: tests/run.sh
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,3 +41,66 @@ jobs:
 
       - name: bash tests/run.sh
         run: bash tests/run.sh
+
+  gates:
+    name: 闸门 · ${{ matrix.target }}
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # integration：当前发布的集成分支（基点 + patch 栈）
+        # upstream：reF1nd 最新 tag，下次 rebase 的目标基点。两者一挂一过，
+        # 就能分清是基点的问题还是 patch 的问题。
+        target: [integration, upstream]
+    steps:
+      - name: 取出自动化分支
+        uses: actions/checkout@v7
+        with: { ref: ci, path: ci }
+
+      - name: 取出被测代码
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET:   ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          . ci/scripts/lib.sh
+          case "$TARGET" in
+            integration)
+              repo=$GITHUB_REPOSITORY
+              ref=$INTEGRATION_BRANCH
+              ;;
+            upstream)
+              . ci/scripts/detect.sh
+              repo=$UPSTREAM_REPO
+              ref=$(latest_upstream_tag)
+              ;;
+            *) die "未知的被测目标：${TARGET}" ;;
+          esac
+          git -c advice.detachedHead=false clone -q --depth 1 --branch "$ref" \
+            "https://github.com/${repo}.git" src
+          summary "被测：\`${repo}@${ref}\`（$(git -C src rev-parse --short HEAD)）"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache-dependency-path: src/go.sum
+
+      - name: 闸门②③
+        working-directory: src
+        run: |
+          set -euo pipefail
+          . ../ci/scripts/resolve.sh
+          gate_build
+          gate_test
+
+      - name: 失败通知
+        if: failure()
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          TARGET:   ${{ matrix.target }}
+          RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          . ci/scripts/notify.sh
+          bark "闸门空跑失败：${TARGET}" "冲突时发布会被闸门拦下，见 Actions run" "$RUN_URL"

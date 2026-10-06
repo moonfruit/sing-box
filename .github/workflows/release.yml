@@ -36,6 +36,8 @@ env:
   #
   # 用系列号而非某个补丁号：与 tap 侧的 go@1.26 保持同一口径（Homebrew 只能钉到
   # 系列），同时还能跟上 1.26.x 的安全补丁。
+  #
+  # 改动时同步 tests.yml 的 GO_VERSION（tests/test_workflows.sh 守着）。
   GO_VERSION: "1.26"
 
 concurrency:
