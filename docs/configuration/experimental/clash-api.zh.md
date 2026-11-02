@@ -209,3 +209,11 @@ Clash 中的默认模式，默认使用 `Rule`。
 缓存 ID。
 
 如果不为空，配置特定的数据将使用由其键控的单独存储。
+
+### DNS 查询扩展
+
+`GET /dns/query?name=example.com&type=A&skip-fake-ip=true` 在解析时跳过选择 fake-IP DNS 服务器的规则，其他 DNS 路由规则仍然生效。如果显式指定或最终兜底的 DNS 服务器为 fake-IP，查询将失败，不会返回假地址。
+
+`skip-fake-ip` 是可选布尔参数。省略或设为 `false` 时保持普通 DNS 查询行为。启用后成功响应包含 `"SkipFakeIP": true`；客户端必须检查该字段，因为旧版本会忽略未知查询参数。非法布尔值返回 HTTP 400。
+
+这是本 fork 的扩展，不是标准 Clash API 参数。解析地址不一定等于远端代理服务器实际使用的地址。

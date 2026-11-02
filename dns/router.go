@@ -1181,7 +1181,7 @@ func (r *Router) exchangeLegacy(ctx context.Context, exchangeCtx *dnsExchangeCon
 	for {
 		dnsCtx := adapter.OverrideContext(ctx)
 		dnsOptions := options
-		transport, rule, ruleIndex = r.matchDNS(ctx, exchangeCtx.rules, true, ruleIndex, isAddressQuery(message), &dnsOptions)
+		transport, rule, ruleIndex = r.matchDNS(ctx, exchangeCtx.rules, !options.SkipFakeIP, ruleIndex, isAddressQuery(message), &dnsOptions)
 		if rule != nil {
 			switch action := rule.Action().(type) {
 			case *R.RuleActionReject:
@@ -1233,7 +1233,7 @@ func (r *Router) Exchange(ctx context.Context, message *mDNS.Msg, options adapte
 		transport = options.Transport
 		response, err = r.client.Exchange(ctx, transport, message, r.finalizeExchangeOptions(options), nil)
 	} else if !exchangeCtx.legacyDNSMode {
-		exchangeResult := r.exchangeWithRules(ctx, exchangeCtx.rules, message, options, true)
+		exchangeResult := r.exchangeWithRules(ctx, exchangeCtx.rules, message, options, !options.SkipFakeIP)
 		response, transport, err = exchangeResult.response, exchangeResult.transport, exchangeResult.err
 	} else {
 		response, transport, err = r.exchangeLegacy(ctx, exchangeCtx, message, options)
@@ -1258,7 +1258,7 @@ func (r *Router) ExchangeAsync(ctx context.Context, message *mDNS.Msg, options a
 			r.finishExchangeAsync(message, transport, response, exchangeErr, callback)
 		})
 	} else if !exchangeCtx.legacyDNSMode {
-		r.exchangeWithRulesAsync(ctx, exchangeCtx.rules, message, options, true, func(result exchangeWithRulesResult) {
+		r.exchangeWithRulesAsync(ctx, exchangeCtx.rules, message, options, !options.SkipFakeIP, func(result exchangeWithRulesResult) {
 			r.finishExchangeAsync(message, result.transport, result.response, result.err, callback)
 		})
 	} else {

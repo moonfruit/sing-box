@@ -212,3 +212,11 @@ Cache file path, `cache.db` will be used if empty.
 Identifier in cache file.
 
 If not empty, configuration specified data will use a separate store keyed by it.
+
+### DNS query extension
+
+`GET /dns/query?name=example.com&type=A&skip-fake-ip=true` resolves a DNS query while skipping rules that select a fake-IP DNS server. Other DNS routing rules still apply. If the selected explicit or final DNS server is fake-IP, the query fails instead of returning a fake address.
+
+`skip-fake-ip` is an optional boolean. Omitting it or setting it to `false` preserves the normal DNS query behavior. Successful responses with this option enabled include `"SkipFakeIP": true`; clients must check this field because older versions ignore unknown query parameters. Invalid boolean values return HTTP 400.
+
+This extension belongs to this fork and is not a standard Clash API parameter. A resolved address is not necessarily the address used by a remote proxy server.
