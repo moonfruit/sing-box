@@ -35,6 +35,7 @@ type DNSClient interface {
 }
 
 type DNSQueryOptions struct {
+	SkipFakeIP             bool
 	Transport              DNSTransport
 	Strategy               C.DomainStrategy
 	LookupStrategy         C.DomainStrategy
