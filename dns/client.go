@@ -346,6 +346,9 @@ func (o *exchangeOperation) release() {
 }
 
 func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool, allowWait bool) (*exchangeOperation, *dns.Msg, exchangeStatus, error) {
+	if options.SkipFakeIP && transport.Type() == C.DNSTypeFakeIP {
+		return nil, nil, exchangeDone, E.New("fakeip DNS transport is not allowed for this query")
+	}
 	err := ctx.Err()
 	if err != nil {
 		return nil, nil, exchangeDone, err

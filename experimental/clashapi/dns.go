@@ -34,12 +34,19 @@ func queryDNS(router adapter.DNSRouter) func(w http.ResponseWriter, r *http.Requ
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), C.DNSTimeout)
+		options, err := dnsQueryOptions(r.URL.Query())
+		if err != nil {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, newError("invalid skip-fake-ip value"))
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), C.DNSTimeout)
 		defer cancel()
 
 		msg := dns.Msg{}
 		msg.SetQuestion(dns.Fqdn(name), qType)
-		resp, err := router.Exchange(ctx, &msg, adapter.DNSQueryOptions{})
+		resp, err := router.Exchange(ctx, &msg, options)
 		if err != nil {
 			render.Status(r, http.StatusInternalServerError)
 			render.JSON(w, r, newError(err.Error()))
@@ -55,6 +62,10 @@ func queryDNS(router adapter.DNSRouter) func(w http.ResponseWriter, r *http.Requ
 			"RA":       resp.RecursionAvailable,
 			"AD":       resp.AuthenticatedData,
 			"CD":       resp.CheckingDisabled,
+		}
+
+		if options.SkipFakeIP {
+			responseData["SkipFakeIP"] = true
 		}
 
 		rr2Json := func(rr dns.RR) render.M {
