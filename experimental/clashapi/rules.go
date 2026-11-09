@@ -21,9 +21,10 @@ func ruleRouter(router adapter.Router, dnsRouter adapter.DNSRouter) http.Handler
 }
 
 type Rule struct {
-	Type    string `json:"type"`
-	Payload string `json:"payload"`
-	Proxy   string `json:"proxy"`
+	Category string `json:"category"`
+	Type     string `json:"type"`
+	Payload  string `json:"payload"`
+	Proxy    string `json:"proxy"`
 
 	Disabled bool   `json:"disabled,omitempty"`
 	UUID     string `json:"uuid,omitempty"`
@@ -34,9 +35,10 @@ func getRules(router adapter.Router, dnsRouter adapter.DNSRouter) func(w http.Re
 		var rules []Rule
 		for _, rule := range dnsRouter.Rules() {
 			rules = append(rules, Rule{
-				Type:    rule.Type(),
-				Payload: rule.String(),
-				Proxy:   rule.Action().String(),
+				Category: "dns",
+				Type:     rule.Type(),
+				Payload:  rule.String(),
+				Proxy:    rule.Action().String(),
 
 				Disabled: rule.Disabled(),
 				UUID:     rule.UUID(),
@@ -44,9 +46,10 @@ func getRules(router adapter.Router, dnsRouter adapter.DNSRouter) func(w http.Re
 		}
 		for _, rule := range router.Rules() {
 			rules = append(rules, Rule{
-				Type:    rule.Type(),
-				Payload: rule.String(),
-				Proxy:   rule.Action().String(),
+				Category: "route",
+				Type:     rule.Type(),
+				Payload:  rule.String(),
+				Proxy:    rule.Action().String(),
 
 				Disabled: rule.Disabled(),
 				UUID:     rule.UUID(),
