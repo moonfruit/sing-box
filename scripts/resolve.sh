@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在真实的 rebase 冲突现场调用 claude，然后跑三道闸门。
+# 在真实的 rebase 冲突现场调用 Pi，然后跑三道闸门。
 # 不预先把上下文切片喂给模型：冲突未必是「同一处代码被改动」，也可能是
 # 「上游变更了别处的 API，patch 必须跟着适配另一个文件」，后者只能靠探索发现。
 set -euo pipefail
@@ -13,17 +13,17 @@ RESOLVE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # 日志必须落在工作树之外：resolve_conflicts 用 git add -A 收拢模型的改动，
 # 工作树内的日志会被一并提交进 patch，随发布源码永久留存并逐次增长。
 # .git/ 目录天然不在 add 的范围内。
-RESOLVE_LOG=${RESOLVE_LOG:-$(git rev-parse --git-dir 2>/dev/null || echo .)/claude-resolution.md}
+RESOLVE_LOG=${RESOLVE_LOG:-$(git rev-parse --git-dir 2>/dev/null || echo .)/pi-resolution.md}
 
-# build_prompt <cur_base> <new_base>
+# build_prompt <cur_base> <new_base> [orig_tip]
 build_prompt() {
-  local cur=$1 new=$2 conflicts patch_files msg
+  local cur=$1 new=$2 orig=${3:-ORIG_HEAD} conflicts patch_files msg
   conflicts=$(git diff --name-only --diff-filter=U)
   # 冲突现场里 HEAD 已经站在新基点上（rebase --onto 先把 HEAD 移到那，再逐个
   # 重放 patch 提交）。$cur..HEAD 因此是「上游改了什么」，不是「patch 碰了什么」。
   # patch 自己的提交区间是 $cur..ORIG_HEAD —— ORIG_HEAD 是 rebase 开始前
   # 分支原本指向的提交，即 patch 栈变基前的旧 tip。
-  patch_files=$(git log --name-only --format= "$cur..$(git rev-parse ORIG_HEAD)" 2>/dev/null \
+  patch_files=$(git log --name-only --format= "$cur..$orig" 2>/dev/null \
                 | sort -u || true)
   msg=$(git log -1 --format=%B REBASE_HEAD 2>/dev/null || printf '(无法读取)')
 
@@ -70,6 +70,15 @@ gate_markers() {
   ( assert_no_markers )
 }
 
+# CI 中，模型和被测 Go 代码只在挂载了源码的容器内运行。定时 Go 检查直接用本机工具链。
+resolve_run() {
+  if [[ -n "${PI_CONTAINER:-}" ]]; then
+    docker exec -i "$PI_CONTAINER" "$@"
+  else
+    "$@"
+  fi
+}
+
 gate_build() {
   [[ -z "${SKIP_GO_GATES:-}" ]] || { log "闸门②：已跳过"; return 0; }
   log "闸门②：go build"
@@ -78,7 +87,7 @@ gate_build() {
   # runner 自带的 gcc/ld 报 "skipping incompatible" 而链接失败。purego 不链接
   # C 代码，Go 侧的类型检查与链接照样完整覆盖，足以承担这道闸门的职责。
   # -o /dev/null：不在工作区里留下 sing-box 二进制。
-  CGO_ENABLED=0 go build -o /dev/null \
+  resolve_run env CGO_ENABLED=0 go build -o /dev/null \
     -tags "$(cat release/DEFAULT_BUILD_TAGS),with_purego" ./cmd/sing-box
 }
 
@@ -95,7 +104,7 @@ gate_test() {
   # experimental/libbox/internal/oomprofile 对 runtime/pprof 内部符号的
   # //go:linkname 引用。Go 1.23 起链接器默认拒绝这种引用，不带它的话，
   # libbox 与 boxdd 的测试二进制在任何基点上都链接失败，闸门③永远过不去。
-  go test -ldflags "$(cat release/LDFLAGS)" -skip "$GATE_TEST_SKIP" ./...
+  resolve_run go test -ldflags "$(cat release/LDFLAGS)" -skip "$GATE_TEST_SKIP" ./...
 }
 
 # newly_touched <new_base> <prev_target> <cur_base>
@@ -112,7 +121,7 @@ newly_touched() {
 
 # resolve_conflicts <cur_base> <new_base>
 resolve_conflicts() {
-  local cur=$1 new=$2 guard=0 orig
+  local cur=$1 new=$2 guard=0 orig patch next_patch
 
   # 守卫：workflow 按 steps.rebase.outcome == 'failure' 分派到这里，但 rebase.sh
   # 也会因为非冲突原因（git describe 找不到 tag、git checkout 失败等）在 set -e
@@ -122,7 +131,7 @@ resolve_conflicts() {
   [[ -d "$(git rev-parse --git-path rebase-merge)" ]] || die "没有进行中的 rebase，拒绝继续"
 
   # 立刻把 ORIG_HEAD 存成字面 SHA，而不是在闸门失败时才去读这个引用。
-  # ORIG_HEAD 是全局状态，claude 在 --permission-mode auto 下执行任何一次
+  # ORIG_HEAD 是全局状态，本地工具执行任何一次
   # git reset（哪怕只是想撤销自己刚刚的暂存、完全合法的操作）都会顺手把它
   # 重写成当时的 HEAD——而循环期间 HEAD 站在新基点上，那不是我们想回退到的
   # 提交。用一份在循环开始前就固定下来的 SHA，不管期间发生什么都不受影响。
@@ -131,12 +140,12 @@ resolve_conflicts() {
   while [[ -d "$(git rev-parse --git-path rebase-merge)" ]]; do
     (( ++guard <= 50 )) || { git rebase --abort; die "冲突轮次超过 50，放弃"; }
 
-    # prompt 走 stdin：--allowedTools 一类的变长参数会吞掉后面的位置参数，
-    # 从管道喂入可以完全绕开这个坑。
-    if ! build_prompt "$cur" "$new" \
-         | claude -p --permission-mode auto >> "$RESOLVE_LOG"; then
+    patch=$(git rev-parse --verify REBASE_HEAD)
+    if ! build_prompt "$cur" "$new" "$orig" \
+         | resolve_run pi --print --no-session --no-approve --model openai/gpt-6.2-sol \
+             --thinking medium >> "$RESOLVE_LOG"; then
       git rebase --abort
-      log "claude 调用失败"
+      log "Pi 调用失败"
       return 1
     fi
 
@@ -151,6 +160,12 @@ resolve_conflicts() {
     } >> "$RESOLVE_LOG"
     git add -A
     if ! GIT_EDITOR=true git rebase --continue; then
+      # 下一条 patch 再次冲突时 Git 也返回非零。只有提交已推进且 index 有
+      # 未合并条目，才交给 Pi 下一轮，其余错误继续走回退。
+      if next_patch=$(git rev-parse --verify -q REBASE_HEAD) && [[ "$next_patch" != "$patch" ]] &&
+         [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+        continue
+      fi
       git rebase --abort
       log "rebase --continue 失败"
       return 1
@@ -160,7 +175,7 @@ resolve_conflicts() {
   if ! gate_markers || ! gate_build || ! gate_test; then
     # 闸门跑在 rebase 收尾之后，此时已不在 rebase 现场，abort 无从谈起。
     # 回退到循环开始前固定下来的字面 SHA（$orig），不再现读 ORIG_HEAD ——
-    # 那个引用可能已经被 claude 期间跑的 git reset 覆写。
+    # 那个引用可能已经被 Pi 期间跑的 git reset 覆写。
     log "闸门未通过，回退到 ${orig}"
     git reset --hard "$orig"
     return 1

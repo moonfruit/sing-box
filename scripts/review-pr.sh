@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把 claude 的解决结果做成一个可审查的 PR。
+# 把 Pi 的解决结果做成一个可审查的 PR。
 #
 # base 分支只是指向 reF1nd tag commit 的一条光秃秃的分支 —— 存在的唯一理由是
 # PR 的 base 必须是分支而不能是 tag。因为 GitHub 的 Files changed 用三点 diff
@@ -51,7 +51,7 @@ pr_body() {
 
 ${newfiles:-（无）}
 
-### claude 的解决说明
+### Pi 的解决说明
 
 $(cat "$logfile")
 

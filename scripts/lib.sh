@@ -27,7 +27,7 @@ summary() {
 #
 # 只应通过 git_auth_set/git_auth_clear 临时写入、用完即清 —— 见 release.yml 里
 # checkout 改用 persist-credentials: false 的说明：凭据不该在整个 job 期间
-# 持久存在于 .git/config，因为同一目录里随后会跑 claude -p，它的提示词里含
+# 持久存在于 .git/config，因为同一目录里随后会跑 pi --print，它的提示词里含
 # 第三方内容（reF1nd 的提交说明），一份长期存在的强凭据是不必要的暴露面。
 git_auth_header() {
   printf 'AUTHORIZATION: basic %s' "$(printf 'x-access-token:%s' "$1" | base64 | tr -d '\n')"

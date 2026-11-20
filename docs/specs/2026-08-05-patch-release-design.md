@@ -70,7 +70,7 @@ v1.14.0-beta.5-reF1nd.1  v1.14.0-beta.5-reF1nd.1-moonfruit
 | `ci`（**默认分支**，orphan） | `README.md` + `.github/workflows/` + `scripts/` + `docs/` | 人工 |
 | `moonfruit`（集成分支） | 最新 reF1nd tag + patch 提交栈 | CI rebase 后 force-push |
 | `v*-moonfruit[.N]`（tag） | `moonfruit` 的发布快照 | CI |
-| `auto/resolve-<tag>` | claude 自动解冲突的结果，待审查 | CI，审查通过后删除 |
+| `auto/resolve-<tag>` | Pi 自动解冲突的结果，待审查 | CI，审查通过后删除 |
 | `base/<tag>` | 指向 reF1nd tag commit，仅作 PR 的 base（PR base 不能是 tag） | CI，审查通过后删除 |
 | `fix-mdns-timeout` 等 | 现有 topic 分支，保留作历史 | 冻结 |
 
@@ -182,7 +182,7 @@ GH_TOKEN=$HOMEBREW_GITHUB_API_TOKEN \
 ```
 rebase 冲突
   │
-  ├─ claude -p 尝试解决（在真实 rebase 冲突现场，三方信息完整）
+  ├─ pi --print 尝试解决（在真实 rebase 冲突现场，三方信息完整）
   │    │
   │    ├─ 三道闸门全过 ─► 推 auto/resolve-<TARGET> + base/<TARGET>
   │    │                 ─► 开 PR ─► Bark（指向 PR，不开 issue）
@@ -190,10 +190,10 @@ rebase 冲突
   │    │
   │    └─ 任一闸门失败 ─► git rebase --abort，不推任何分支 ─► issue + Bark
   │
-  └─ claude 未启用或调用失败 ─► git rebase --abort ─► issue + Bark
+  └─ Pi 未启用或调用失败 ─► git rebase --abort ─► issue + Bark
 ```
 
-### 6.1 claude 的运行方式
+### 6.1 Pi 的运行方式
 
 **不预先把上下文切片喂给它**，而是让它在**真实的 rebase 冲突工作树**中运行，拥有完整仓库访问（Bash / Read / Grep / Edit）。只切一个冲突文件是不够的：冲突可能并非「同一处代码被改动」，而是「上游变更了别处的 API，patch 必须跟着适配另一个文件」，这类成因只能靠探索发现。
 
@@ -205,7 +205,10 @@ prompt 只负责给出线索并划定边界：
 - 明确要求：先判定冲突成因属于上述两类中的哪一类；若为 API 变更，须检查 patch 触及的所有文件及相关调用点
 - 允许并鼓励它自行运行 `go build` / `go test` 自验
 
-凭据：`CLAUDE_CODE_OAUTH_TOKEN`（复用 Claude 订阅额度，不产生 API 费用）。
+Pi 使用 `openai/gpt-6.2-sol` 和 OpenAI Responses API。仓库的 Actions Secret
+`OPENAI_API_KEY` 应来自领取 API 额度的组织下的项目。只有代理容器持有此 Key。
+Pi 和 Go 检查在独立容器内运行，源码可写，`.git` 只读。宿主脚本逐个继续 rebase，
+遇到下一个冲突提交时重新生成提示词，并把每轮解决说明追加到审查日志。
 
 ### 6.2 三道闸门
 
@@ -234,7 +237,7 @@ PR 正文由 CI 填充：
 
 - 基点变更：`<CUR_BASE>` → `<BASE>`
 - 冲突文件清单，以及本次解决相对上一版**新触及的文件**（见 §6.2）
-- claude 的解决说明（其自身输出）
+- Pi 的解决说明（其自身输出）
 - `git range-diff` 输出 —— patch 相对上一版的变化，审查的核心
 - 三道闸门结果与 build/test 日志链接
 - 人工接管命令（见 §6.4）
@@ -274,12 +277,12 @@ CI 会把这条命令（含实际的 tag 名）直接写在通知与 PR 正文�
 | --- | --- | --- |
 | 打 tag 成功 | ✓ 基点、目标 tag、patch 清单；url 指向 Release | — |
 | 全流程完成 | ✓ 含 tap PR 链接；url 指向该 PR | — |
-| 冲突，claude 解决成功 | ✓ url 指向审查 PR | —（PR 即载体，见 §6.3） |
-| 冲突，claude 失败或未启用 | ✓ url 指向 issue | ✓ |
+| 冲突，Pi 解决成功 | ✓ url 指向审查 PR | —（PR 即载体，见 §6.3） |
+| 冲突，Pi 失败或未启用 | ✓ url 指向 issue | ✓ |
 | 闸门失败 | ✓ url 指向 issue | ✓ |
 | 构建/发布失败 | ✓ url 指向 Actions run | ✓ |
 
-issue 正文含冲突文件、claude 的尝试结果、人工解决命令（§6.4）。以标签 `release-conflict` 检索既有 open issue，同一目标 tag 只追加评论，不重复开。
+issue 正文含冲突文件、Pi 的尝试结果、人工解决命令（§6.4）。以标签 `release-conflict` 检索既有 open issue，同一目标 tag 只追加评论，不重复开。
 
 「打 tag 成功」与「全流程完成」两条若嫌吵，可只保留后者（它含 tap PR 链接，信息量更大）。
 
@@ -290,7 +293,7 @@ issue 正文含冲突文件、claude 的尝试结果、人工解决命令（§6.
 | `GH_PAT` | 唯一的 GitHub PAT，需 `repo` + `workflow` 两个 scope。两处用途：<br>① `prepare` 的 checkout —— 集成分支与冲突路径的临时分支都带着上游的 `.github/workflows/`，而 `GITHUB_TOKEN` 是 App 令牌、被 GitHub 禁止创建或修改 workflow 文件，且没有任何 `permissions:` 键能授予该能力；<br>② `tap-bump` —— 跨仓库向 moonfruit/homebrew-tap 开 PR 并打标签，`GITHUB_TOKEN` 够不到其它仓库。注入时映射为 `HOMEBREW_GITHUB_API_TOKEN`，那是 `brew` 认得的变量名。<br>其余 fork 内操作一律用 `GITHUB_TOKEN` |
 | `GITEE_USER` / `GITEE_TOKEN` | Gitee `binary` 分支推送（自 sing-box-release 迁移） |
 | `BARK_URL` | Bark 推送端点 |
-| `CLAUDE_CODE_OAUTH_TOKEN` | CI 内 `claude -p` 自动解冲突（`claude setup-token` 生成） |
+| `OPENAI_API_KEY` | Pi 解决冲突时通过代理调用 OpenAI Responses API 的项目密钥 |
 
 仓库设置：
 
@@ -329,4 +332,4 @@ issue 正文含冲突文件、claude 的尝试结果、人工解决命令（§6.
 - **每个上游版本需要一次 rebase**：无论自动还是人工。这是 fork 模型的固有成本，patch 文件模型同样存在，且解决能力更弱。
 - **`git rerere`**：可让同一处代码在连续多个 reF1nd 版本上的重复冲突自动重放上次解法，需提交 `rr-cache`。当前不引入（YAGNI），若同一冲突出现第三次再考虑。
 - **topic 分支退役**：`fix-mdns-timeout` 等分支冻结为历史，不再作为真源。patch 数量少，单条集成分支上 `rebase -i` 足以管理。
-- **claude 自动解冲突不自动发布**：三道闸门全过也仅开 PR 等待人工在 PR 内评论 `/ship`。理由：这是日常使用的代理二进制，且 patch 触及 DNS 内部逻辑。
+- **Pi 自动解冲突不自动发布**：三道闸门全过也仅开 PR 等待人工在 PR 内评论 `/ship`。理由：这是日常使用的代理二进制，且 patch 触及 DNS 内部逻辑。

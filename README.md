@@ -32,4 +32,16 @@ git push -f origin moonfruit
 git rebase --onto <新 reF1nd tag> <旧 reF1nd tag> moonfruit
 ```
 
+## 配置自动解冲突
+
+在领取 API 额度的 OpenAI 组织中创建项目密钥，保存为仓库的 Actions Secret。
+下面的命令会交互式读取密钥。
+
+```bash
+gh secret set OPENAI_API_KEY --repo moonfruit/sing-box
+```
+
+rebase 冲突时，Pi 使用 `openai/gpt-6.2-sol` 处理当前 patch。全部 patch 通过构建和测试后，
+CI 开审查 PR，由仓库所有者评论 `/ship` 放行。
+
 设计与流程细节见 [docs/specs/2026-08-05-patch-release-design.md](docs/specs/2026-08-05-patch-release-design.md)。

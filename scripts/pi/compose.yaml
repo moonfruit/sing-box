@@ -1,0 +1,18 @@
+services:
+  openai:
+    image: caddy:2-alpine
+    environment:
+      - OPENAI_API_KEY
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  pi:
+    build:
+      context: .
+      args:
+        GO_VERSION: ${GO_VERSION:-1.26}
+    user: "${PI_UID:?}:${PI_GID:?}"
+    working_dir: /src
+    command: ["sleep", "infinity"]
+    volumes:
+      - ${PI_SRC:?}:/src
+      - ${PI_SRC:?}/.git:/src/.git:ro

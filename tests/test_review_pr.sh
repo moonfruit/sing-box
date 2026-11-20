@@ -11,7 +11,7 @@ d=$(mktemp -d); make_fixture "$d" clean
 # 上一版，不是凭空传给 pr_body 的字符串。
 git -C "$d" tag v1.0-reF1nd-moonfruit moonfruit
 ( cd "$d" && bash "$HERE/../scripts/rebase.sh" v1.1-reF1nd moonfruit )
-# 模拟「claude 解决冲突时顺带对 patch 做了改动」，让新旧两版的 range-diff 里
+# 模拟「Pi 解决冲突时顺带对 patch 做了改动」，让新旧两版的 range-diff 里
 # 真的出现一行差异，而不只是「同一个提交换了个 SHA」这种平凡等价。
 printf 'line1\npatched\nextra\n' > "$d/app.go"
 ( cd "$d" && git add -A && git commit -q --amend -m 'personal patch' )
@@ -30,7 +30,7 @@ body=$( cd "$d" \
 
 assert_contains "$body" "v1.0-reF1nd"            "正文含旧基点"
 assert_contains "$body" "v1.1-reF1nd"            "正文含新基点"
-assert_contains "$body" "我把两侧改动合并了。"    "正文含 claude 的说明"
+assert_contains "$body" "我把两侧改动合并了。"    "正文含 Pi 的说明"
 assert_contains "$body" "range-diff"             "正文含 range-diff 段落"
 assert_contains "$body" "/ship"                  "正文含放行说明"
 assert_contains "$body" "git rebase --onto"      "正文含人工接管命令"
@@ -41,7 +41,7 @@ assert_eq "$(printf '%s' "$body" | grep -c '该基点下没有上一版')" 0 \
   "range-diff 不是「无从比较」的占位文案"
 
 # Minor：解决日志为空时拒绝生成 PR 正文，而不是悄悄贴出一段空白的
-# 「claude 的解决说明」——空日志本身就说明上一步没有正常留痕，该早失败。
+# 「Pi 的解决说明」——空日志本身就说明上一步没有正常留痕，该早失败。
 empty_log=$(mktemp)
 assert_fail "解决日志为空时 pr_body 拒绝生成正文" bash -c \
   "cd '$d' && . '$HERE/../scripts/review-pr.sh' \

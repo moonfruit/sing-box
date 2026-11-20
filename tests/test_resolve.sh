@@ -14,31 +14,55 @@ start_conflict() {   # start_conflict <dir> —— 制造并停在冲突现场
   ( cd "$1" && bash "$HERE/../scripts/rebase.sh" v1.1-reF1nd moonfruit ) || true
 }
 
-# claude 解决成功 → 退出 0，rebase 收尾，无标记残留
+# Pi 解决成功 → 退出 0，rebase 收尾，无标记残留
 d=$(mktemp -d); start_conflict "$d"
 assert_ok "解决成功" bash -c \
-  "cd '$d' && CLAUDE_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+  "cd '$d' && PI_STUB_MODE=resolve SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.1-reF1nd "解决后落在新基点上"
 assert_eq "$(sed -n 2p "$d/app.go")" resolved "解决结果写入文件"
 # git add -A 会收拢工作树里的一切；诊断日志绝不能混进 patch 提交
-assert_eq "$(git -C "$d" show --pretty= --name-only HEAD | grep -c 'claude-resolution' || true)" \
+assert_eq "$(git -C "$d" show --pretty= --name-only HEAD | grep -c 'pi-resolution' || true)" \
           0 "诊断日志未被提交进 patch"
 rm -rf "$d"
 
-# claude 留下标记 → 闸门①拦截，退出非 0，rebase 已 abort
+# 两个独立 patch 连续冲突。每轮都要读到当前 REBASE_HEAD 的提交说明。
+d=$(mktemp -d); make_fixture "$d" conflict
+git -C "$d" checkout -q main
+printf 'upstream other\n' > "$d/other.go"
+git -C "$d" commit -qam 'upstream changes other'
+git -C "$d" tag v1.2-reF1nd
+git -C "$d" checkout -q moonfruit
+printf 'patched other\n' > "$d/other.go"
+git -C "$d" commit -qam 'second personal patch'
+old_tip=$(git -C "$d" rev-parse moonfruit)
+( cd "$d" && bash "$HERE/../scripts/rebase.sh" v1.2-reF1nd moonfruit ) || true
+assert_fail "第二次冲突调用失败" bash -c \
+  "cd '$d' && PI_STUB_MODE=fail-second bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.2-reF1nd"
+assert_eq "$(git -C "$d" rev-parse moonfruit)" "$old_tip" "第二轮失败后回到原 patch 栈"
+assert_fail "第二轮失败后清理 rebase 状态" test -d "$d/.git/rebase-merge"
+( cd "$d" && bash "$HERE/../scripts/rebase.sh" v1.2-reF1nd moonfruit ) || true
+assert_ok "两个冲突依次交给 Pi" bash -c \
+  "cd '$d' && PI_STUB_MODE=consecutive bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.2-reF1nd"
+assert_ok "两个提交均在新基点上" git -C "$d" merge-base --is-ancestor v1.2-reF1nd moonfruit
+assert_eq "$(git -C "$d" log --reverse --format=%s v1.2-reF1nd..moonfruit)" \
+          "$(printf 'personal patch\nsecond personal patch')" "新基点上保留两个 patch"
+assert_eq "$(cat "$d/other.go")" 'resolved other' "第二轮解决结果写入文件"
+rm -rf "$d"
+
+# Pi 留下标记 → 闸门①拦截，退出非 0，rebase 已 abort
 d=$(mktemp -d); start_conflict "$d"
 assert_fail "标记残留被拦截" bash -c \
-  "cd '$d' && CLAUDE_STUB_MODE=leave SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+  "cd '$d' && PI_STUB_MODE=leave SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_fail "rebase 现场已清理" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
 assert_eq "$(git -C "$d" describe --tags --match '*-reF1nd*' --exclude '*-moonfruit*' --abbrev=0 moonfruit)" \
           v1.0-reF1nd "abort 后基点回到原处"
 rm -rf "$d"
 
-# claude 调用失败 → 退出非 0，rebase 已 abort
+# Pi 调用失败 → 退出非 0，rebase 已 abort
 d=$(mktemp -d); start_conflict "$d"
-assert_fail "claude 失败被处理" bash -c \
-  "cd '$d' && CLAUDE_STUB_MODE=fail SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+assert_fail "Pi 失败被处理" bash -c \
+  "cd '$d' && PI_STUB_MODE=fail SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_fail "rebase 现场已清理" test -d "$d/$(git -C "$d" rev-parse --git-path rebase-merge)"
 rm -rf "$d"
 
@@ -57,19 +81,19 @@ rm -rf "$d"
 d=$(mktemp -d); start_conflict "$d"
 log=$(mktemp)
 assert_ok "解决成功（模型顺手留下未跟踪草稿）" bash -c \
-  "cd '$d' && CLAUDE_STUB_MODE=resolve-with-draft SKIP_GO_GATES=1 RESOLVE_LOG='$log' bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+  "cd '$d' && PI_STUB_MODE=resolve-with-draft SKIP_GO_GATES=1 RESOLVE_LOG='$log' bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_contains "$(cat "$log")" "scratch-notes.md" \
   "add -A 前的 git status 快照记下了模型顺手留下的未跟踪文件"
 rm -rf "$d" "$log"
 
-# Important-5：闸门失败时的回退不能依赖 ORIG_HEAD——它是全局状态，claude 在
-# auto 模式下执行任何一次 git reset 都会把它重写成 mid-rebase 时的 HEAD（新
+# Important-5：闸门失败时的回退不能依赖 ORIG_HEAD——它是全局状态，本地运行时
+# 任何一次 git reset 都会把它重写成 mid-rebase 时的 HEAD（新
 # 基点）。用 leave-corrupt 模式模拟这个覆写，验证回退落到的仍是 rebase 前的
 # 真实 patch 提交，而不是被覆写后指向的新基点。
 d=$(mktemp -d); start_conflict "$d"
 orig_before=$(git -C "$d" rev-parse ORIG_HEAD)
 assert_fail "ORIG_HEAD 被模型覆写后，闸门仍然拦截（标记残留）" bash -c \
-  "cd '$d' && CLAUDE_STUB_MODE=leave-corrupt SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
+  "cd '$d' && PI_STUB_MODE=leave-corrupt SKIP_GO_GATES=1 bash '$HERE/../scripts/resolve.sh' v1.0-reF1nd v1.1-reF1nd"
 assert_eq "$(git -C "$d" rev-parse moonfruit)" "$orig_before" \
   "回退到的是 rebase 前的真实 patch 提交，而不是被覆写后的 ORIG_HEAD（新基点）"
 rm -rf "$d"

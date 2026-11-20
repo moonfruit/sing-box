@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# claude 的测试替身。CLAUDE_STUB_MODE 决定它如何「解决」冲突。
+# Pi 的测试替身。PI_STUB_MODE 决定它如何「解决」冲突。
 set -euo pipefail
-# 先读空 stdin：真实的 claude -p 会读取完整提示词；这里不关心内容，但必须把
-# 管道另一端（build_prompt 的 cat）写入的内容读完，否则一旦本进程提前退出、
-# 关闭读端，写端会被 SIGPIPE 杀死，在 pipefail 下把「已解决」误判为「调用失败」。
-cat >/dev/null
-case "${CLAUDE_STUB_MODE:-resolve}" in
+prompt=$(cat)
+[[ "$*" == '--print --no-session --no-approve --model openai/gpt-6.2-sol --thinking medium' ]]
+case "${PI_STUB_MODE:-resolve}" in
+  consecutive|fail-second)
+    file=$(git diff --name-only --diff-filter=U)
+    [[ "$prompt" == *"$(git log -1 --format=%s REBASE_HEAD)"* ]]
+    case "$file" in
+      app.go)   printf 'line1\nresolved\n' > app.go ;;
+      other.go)
+        [[ "$PI_STUB_MODE" != fail-second ]] || exit 1
+        printf 'resolved other\n' > other.go ;;
+      *) exit 1 ;;
+    esac
+    printf '已解决 %s\n' "$file" ;;
   resolve)   printf 'line1\nresolved\n' > app.go; printf '已合并两侧改动\n' ;;
   resolve-with-draft)
     # 除了正常解决冲突，顺手留一份未跟踪的草稿文件——模拟模型探索过程中
@@ -16,7 +25,7 @@ case "${CLAUDE_STUB_MODE:-resolve}" in
     ;;
   leave)     printf '我放弃了\n' ;;   # 不动文件，冲突标记留在原地
   leave-corrupt)
-    # 模拟模型在 --permission-mode auto 下合法地跑了一次不带参数的 git reset
+    # 模拟本地调用模型时跑了一次不带参数的 git reset
     # （哪怕只是想撤销自己刚刚的暂存）：mixed reset 在冲突现场是被允许的，
     # 不动工作区（冲突标记原样留在文件里，闸门①依然会拦下），但会把 ORIG_HEAD
     # 悄悄重写成执行时的 HEAD——此刻 mid-rebase，HEAD 站在新基点上，不是我们

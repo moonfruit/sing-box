@@ -135,13 +135,13 @@ jobs:
       notified: ${{ steps.review.outputs.notified || steps.conflict.outputs.notified }}
     steps:
       - uses: actions/checkout@v7
-        with: { ref: ci, path: ci }
+        with: { ref: ci, path: ci, persist-credentials: false }
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: src
           # 不让 actions/checkout 把凭据持久写进 src/.git/config：这个目录后面
-          # 会跑 claude -p --permission-mode auto，它的提示词里含第三方内容
+          # 会跑 pi --print，它的提示词里含第三方内容
           # （reF1nd 的提交说明）。若 .git/config 里躺着一个跨仓库、长期有效
           # 的 PAT，任何能引导它执行 git 命令的输入都能顺手把凭据带出去。
           # 真正需要推送（集成分支/审查 PR 的临时分支都带着上游的
@@ -149,9 +149,6 @@ jobs:
           # 的步骤，改为用 scripts/lib.sh 的 git_auth_set/git_auth_clear
           # 现取现用、用完即清。
           persist-credentials: false
-      - uses: actions/setup-go@v7
-        with: { go-version: "${{ env.GO_VERSION }}" }
-
       - name: 配置 git 身份并拉取 reF1nd tag
         working-directory: src
         run: |
@@ -186,25 +183,33 @@ jobs:
           BASE: ${{ needs.detect.outputs.base }}
         run: bash ../ci/scripts/rebase.sh "$BASE" "$INTEGRATION_BRANCH"
 
-      - name: 自动解决冲突
+      - name: 使用 Pi 自动解决冲突
         id: resolve
         if: steps.rebase.outcome == 'failure'
         working-directory: src
         continue-on-error: true
-        # 没有这道上限，claude 卡死会占满默认的 6 小时，且 concurrency: group: release
+        # 没有这道上限，Pi 卡死会占满默认的 6 小时，且 concurrency: group: release
         # 会堵住后续所有 run（包括次日的 cron）。
         timeout-minutes: 60
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CUR_BASE: ${{ needs.detect.outputs.cur_base }}
           BASE:     ${{ needs.detect.outputs.base }}
         run: |
           set -euo pipefail
-          npm install -g @anthropic-ai/claude-code@latest
-          # 冒烟测试：不锁版本，--permission-mode auto 这类 CLI 参数哪天改名/移除，
-          # 冲突解决器就会在唯一真正用得上它的那天失效，而日志上跟「模型解不开冲突」
-          # 同形，排查时容易先怀疑错方向 —— 先在这里就地暴露出来。
-          claude --version
+          : "${OPENAI_API_KEY:?请配置关联 API 组织的 OPENAI_API_KEY Secret}"
+          export COMPOSE_FILE="$GITHUB_WORKSPACE/ci/scripts/pi/compose.yaml"
+          export PI_SRC="$PWD" PI_UID PI_GID
+          PI_UID=$(id -u)
+          PI_GID=$(id -g)
+          trap 'docker compose down --volumes' EXIT
+          # 只有代理容器接收真实 Key。Pi 及 Go 测试共享源码，Git 暂存与变基由宿主脚本执行。
+          docker compose up -d openai
+          unset OPENAI_API_KEY
+          docker compose up --build -d pi
+          PI_CONTAINER=$(docker compose ps -q pi)
+          : "${PI_CONTAINER:?Pi 容器未启动}"
+          export PI_CONTAINER
           bash ../ci/scripts/resolve.sh "$CUR_BASE" "$BASE"
 
       - name: 开审查 PR
@@ -222,8 +227,8 @@ jobs:
           set -euo pipefail
           . ../ci/scripts/notify.sh
           # review-pr.sh 要推 base/*、auto/resolve-* 两条临时分支，两者都带着上游的
-          # .github/workflows/，需要 workflow scope 的 PAT。这一步在 claude 之后，
-          # 现取现用、用完即清，凭据不会在 claude 的执行窗口内出现在 .git/config 里。
+          # .github/workflows/，需要 workflow scope 的 PAT。这一步在 Pi 之后，
+          # 现取现用、用完即清，凭据不会在 Pi 的执行窗口内出现在 .git/config 里。
           git_auth_set "$GH_PAT"
           url=$(bash ../ci/scripts/review-pr.sh "$BASE" "$TARGET")
           git_auth_clear

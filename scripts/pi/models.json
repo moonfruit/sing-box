@@ -1,0 +1,18 @@
+{
+  "providers": {
+    "openai": {
+      "baseUrl": "http://openai:8080/v1",
+      "api": "openai-responses",
+      "apiKey": "sk-local-proxy",
+      "models": [
+        {
+          "id": "gpt-6.2-sol",
+          "name": "GPT-6.2 Sol",
+          "reasoning": true,
+          "contextWindow": 1050000,
+          "maxTokens": 128000
+        }
+      ]
+    }
+  }
+}

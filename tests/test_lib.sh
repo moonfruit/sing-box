@@ -17,7 +17,7 @@ assert_eq "$decoded" "x-access-token:a-real-token" "git_auth_header：base64 解
 
 # git_auth_set / git_auth_clear：用完即清，不能在 .git/config 里留下痕迹 ——
 # 这正是 C3 的核心：checkout 关掉 persist-credentials 后，凭据只应在真正推送/
-# 拉取的那一刻短暂存在，claude -p 跑的那个窗口期内 .git/config 里不该有它。
+# 拉取的那一刻短暂存在，pi --print 跑的那个窗口期内 .git/config 里不该有它。
 d=$(mktemp -d); git init -q "$d"
 assert_eq "$(git -C "$d" config --local --get http.https://github.com/.extraheader || true)" "" \
   "git_auth_set 之前：仓库里没有这条凭据"
