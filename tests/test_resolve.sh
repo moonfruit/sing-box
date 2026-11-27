@@ -134,16 +134,20 @@ assert_eq "$patch_files" app.go \
 git -C "$d" rebase --abort 2>/dev/null || true
 rm -rf "$d"
 
-# 闸门③必须与 release 构建用同一份 LDFLAGS：其中的 -checklinkname=0 放行了
-# libbox 对 runtime/pprof 内部符号的 linkname 引用，少了它 libbox/boxdd 的测试
-# 二进制在任何基点上都链接失败，闸门③永远过不去——只要进了冲突路径，发布就
-# 必然中止。同时要跳过在 runner 上没有权限运行的测试。
+# alpha.14 的 oomkiller 和 libbox 测试都需要 release/LDFLAGS 中的 -checklinkname=0。
 d=$(mktemp -d); mkdir -p "$d/release"
+printf '%s\n' 'with_clash_api,badlinkname' > "$d/release/DEFAULT_BUILD_TAGS"
+printf '%s\n' 'with_wireguard,badlinkname' > "$d/release/DEFAULT_BUILD_TAGS_OTHERS"
 printf '%s\n' '-X runtime.godebugDefault=multipathtcp=0 -checklinkname=0' > "$d/release/LDFLAGS"
 log=$(mktemp)
+assert_ok "闸门②调用 go build" bash -c \
+  "cd '$d' && unset SKIP_GO_GATES && GO_STUB_LOG='$log' && export GO_STUB_LOG && . '$HERE/../scripts/resolve.sh' && gate_build"
+assert_eq "$(cat "$log")" "$(printf '%s\n' build -o /dev/null -tags 'with_clash_api,badlinkname,with_purego' \
+  -ldflags '-X runtime.godebugDefault=multipathtcp=0 -checklinkname=0' ./cmd/sing-box)" \
+  "闸门②使用 purego 构建标签并传入完整的 release/LDFLAGS"
 assert_ok "闸门③调用 go test" bash -c \
   "cd '$d' && unset SKIP_GO_GATES && GO_STUB_LOG='$log' && export GO_STUB_LOG && . '$HERE/../scripts/resolve.sh' && gate_test"
-assert_eq "$(cat "$log")" "$(printf '%s\n' test -ldflags \
+assert_eq "$(cat "$log")" "$(printf '%s\n' test -tags 'with_wireguard,badlinkname' -ldflags \
   '-X runtime.godebugDefault=multipathtcp=0 -checklinkname=0' -skip '^TestUnshareNamespace$' ./...)" \
-  "闸门③带上 release/LDFLAGS 并跳过 runner 上无权限的测试"
+  "闸门③使用上游测试标签和链接参数，并跳过 runner 上无权限的测试"
 rm -rf "$d" "$log"
