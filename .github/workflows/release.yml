@@ -91,7 +91,7 @@ jobs:
           PR:        ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-          ref=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          ref=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefName --jq .headRefName)
           # 校验分支名：否则在任意一个 PR 下评论 /ship 都能把那条 head 发出去
           case "$ref" in
             auto/resolve-*) ;;
