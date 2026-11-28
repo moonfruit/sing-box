@@ -297,10 +297,13 @@ jobs:
           assert_no_markers
           # 推 workflow 文件所在的分支与 tag，需要带 workflow scope 的 PAT；
           # 现取现用、用完即清（见 checkout 的 persist-credentials: false 注释）。
+          # 分支与 tag 必须合并为单次原子推送：分两次 push 时，第二次推 tag 可能在
+          # GitHub 后端尚未完成前一次强推的对象同步时到达，导致 remote rejected
+          # (missing necessary objects)，并留下分支已更新但 tag 缺失的半成品状态。
+          # 用 + 前缀只允许强推集成分支，tag 保持非强推语义。
           git_auth_set "$GH_PAT"
-          git push -f origin "HEAD:refs/heads/${INTEGRATION_BRANCH}"
           git tag "$TARGET"
-          git push origin "refs/tags/${TARGET}"
+          git push --atomic origin "+HEAD:refs/heads/${INTEGRATION_BRANCH}" "refs/tags/${TARGET}"
           git_auth_clear
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           . ../ci/scripts/notify.sh
